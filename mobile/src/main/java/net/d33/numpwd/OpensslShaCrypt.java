@@ -27,6 +27,8 @@ public final class OpensslShaCrypt {
 
     /** Thrown where {@code openssl passwd} prints "&lt;NULL&gt;" or fails. */
     public static final class InvalidInputException extends Exception {
+        private static final long serialVersionUID = 1L;
+
         public InvalidInputException(String message) {
             super(message);
         }

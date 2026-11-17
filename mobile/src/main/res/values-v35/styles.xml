@@ -1,6 +1,8 @@
-<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="FreeOTP.OptOutEdgeToEdgeEnforcement" parent="FreeOTP.Purple">
+    <!-- Opt out of the edge-to-edge enforcement of targetSdk 35. Android 16 ignores the
+         opt-out at targetSdk 36; SystemBarInsets keeps the content out of the bars there. -->
+    <style name="NumPwd.App" parent="NumPwd">
         <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
     </style>
 </resources>

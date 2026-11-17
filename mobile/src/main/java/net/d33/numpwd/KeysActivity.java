@@ -25,9 +25,6 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
 
-import org.fedorahosted.freeotp.R;
-import org.fedorahosted.freeotp.utils.SystemBarInsets;
-
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -152,6 +149,9 @@ public class KeysActivity extends AppCompatActivity {
         layout.setHint(getString(R.string.password_hint));
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         layout.setEndIconMode(TextInputLayout.END_ICON_PASSWORD_TOGGLE);
+        // A password manager must not offer to save the master password.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            view.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle(getString(R.string.password_title, name))
@@ -159,6 +159,7 @@ public class KeysActivity extends AppCompatActivity {
                 .setNegativeButton(R.string.cancel, null)
                 .setPositiveButton(R.string.ok, null)
                 .create();
+        secure(dialog);
         Runnable submit = () -> {
             String password = String.valueOf(input.getText());
             input.setText("");
@@ -184,6 +185,7 @@ public class KeysActivity extends AppCompatActivity {
                 .setNegativeButton(R.string.close, null)
                 .setPositiveButton(R.string.copy, null)
                 .create();
+        secure(dialog);
         final String[] digits = {null};
         dialog.setOnShowListener(d -> {
             View copy = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
@@ -253,6 +255,16 @@ public class KeysActivity extends AppCompatActivity {
             cm.clearPrimaryClip();
         else
             cm.setPrimaryClip(ClipData.newPlainText("", ""));
+    }
+
+    /**
+     * Keeps the password and the digits out of screenshots and screen recordings. Only these
+     * dialogs are secure, so the key list can still be captured.
+     */
+    private static void secure(AlertDialog dialog) {
+        if (dialog.getWindow() != null)
+            dialog.getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+                    WindowManager.LayoutParams.FLAG_SECURE);
     }
 
     private void showWithKeyboard(AlertDialog dialog, View input) {

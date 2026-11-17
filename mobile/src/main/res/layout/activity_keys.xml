@@ -8,13 +8,13 @@
     <com.google.android.material.appbar.AppBarLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:theme="@style/FreeOTP.Purple">
+        android:theme="@style/NumPwd">
 
         <androidx.appcompat.widget.Toolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="?android:attr/actionBarSize"
-            android:theme="@style/ToolbarStyle"
+            android:theme="@style/NumPwd.Toolbar"
             app:title="@string/app_name" />
     </com.google.android.material.appbar.AppBarLayout>
 

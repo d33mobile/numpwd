@@ -1,26 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Base application theme -->
-    <style name="Base.FreeOTP" parent="@style/Theme.MaterialComponents.DayNight.NoActionBar">
-    </style>
-
-    <style name="FreeOTP" parent="@style/Base.FreeOTP"/>
-
-    <style name="FreeOTP.Purple">
+    <style name="NumPwd" parent="@style/Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="colorPrimary">@color/purple_500</item>
         <item name="colorSecondary">@color/purple_500</item>
-        <item name="colorPrimaryVariant">@color/freeotp_grey_primary</item>
-        <item name="colorSurface">@color/freeotp_white_primary</item>
+        <item name="colorPrimaryVariant">@color/variant_light</item>
+        <item name="colorSurface">@color/surface_light</item>
         <item name="colorPrimaryDark">@color/purple_700</item>
-        <item name="buttoncolor">@drawable/buttoncolor</item>
     </style>
 
-    <style name="FreeOTP.NoActionBar">
-        <item name="windowActionBar">false</item>
-        <item name="windowNoTitle">true</item>
+    <style name="NumPwd.Toolbar" parent="ThemeOverlay.AppCompat.ActionBar">
+        <item name="android:textColorPrimary">@color/white</item>
     </style>
-
-    <style name="Theme.MyApplication.AppBarOverlay" parent="ThemeOverlay.AppCompat.Dark.ActionBar" />
-
-    <style name="Theme.MyApplication.PopupOverlay" parent="ThemeOverlay.AppCompat.Light" />
 </resources>
