@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <dimen name="margin">16dp</dimen>
+    <dimen name="result_code_text">44sp</dimen>
+    <dimen name="result_status_text">18sp</dimen>
 </resources>

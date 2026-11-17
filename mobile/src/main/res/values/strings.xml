@@ -11,11 +11,12 @@
     <string name="key_name_invalid">The name must not be empty or contain line breaks</string>
     <string name="password_title">Password for \"%1$s\"</string>
     <string name="password_hint">Password</string>
-    <string name="result_title">Digits for \"%1$s\"</string>
-    <string name="result_hint" translatable="false">openssl passwd -6 -salt KEY | tr -dc \'[0-9]\'</string>
+    <string name="result_title">Code for \"%1$s\"</string>
+    <string name="result_hint" translatable="false">openssl passwd -6 -salt KEY | tr -dc \'[0-9]\' | head -c6\nbelow: the same without head -c6</string>
     <string name="result_error">openssl would print no digits: %1$s</string>
     <string name="computing">Computing…</string>
     <string name="copy">Copy</string>
+    <string name="copy_all">Copy all</string>
     <string name="copied">Copied, the clipboard is cleared in %1$d s</string>
     <string name="rename">Rename</string>
     <string name="delete">Delete</string>

@@ -15,6 +15,8 @@ import static androidx.test.espresso.matcher.ViewMatchers.withText;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.os.SystemClock;
 import android.widget.TextView;
@@ -25,6 +27,7 @@ import androidx.test.espresso.NoMatchingRootException;
 import androidx.test.espresso.NoMatchingViewException;
 import androidx.test.espresso.ViewAction;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
 
 import org.junit.After;
 import org.junit.Before;
@@ -34,10 +37,16 @@ import org.junit.runner.RunWith;
 import java.util.Arrays;
 import java.util.Collections;
 
-/** UI smoke test: add a key, enter a password, read the digits; rename and delete a key. */
+/**
+ * UI smoke test: add a key, enter a password, read and copy the code and the full digits;
+ * rename and delete a key.
+ */
 @RunWith(AndroidJUnit4.class)
 public class KeysActivityTest {
-    // openssl passwd -6 -salt test abc | tr -dc '[0-9]' -> 65955012972, shown in groups of four.
+    // openssl passwd -6 -salt test abc | tr -dc '[0-9]' | head -c6
+    private static final String TEST_CODE = "659550";
+    // The whole tr output, 65955012972, shown below the code in groups of four.
+    private static final String TEST_DIGITS = "65955012972";
     private static final String TEST_DIGITS_GROUPED = "6595 5012 972";
     // Generous because a loaded emulator can take several seconds per dialog transition;
     // without cancellation the second derivation would still wait for many minutes.
@@ -77,7 +86,14 @@ public class KeysActivityTest {
         onData(is("test")).inAdapterView(withId(R.id.keys)).perform(tap());
         enterInDialog("abc");
 
-        assertEquals(TEST_DIGITS_GROUPED, waitForResult());
+        assertEquals(TEST_CODE, waitForResult());
+        onView(withId(R.id.result_full)).inRoot(isDialog()).check(matches(withText(TEST_DIGITS_GROUPED)));
+
+        onView(withId(android.R.id.button1)).inRoot(isDialog()).perform(click());
+        assertEquals(TEST_CODE, clipboardText());
+        onView(withId(android.R.id.button3)).inRoot(isDialog()).perform(click());
+        assertEquals(TEST_DIGITS, clipboardText());
+
         assertEquals(Collections.singletonList("test"),
                 new KeyNames(ApplicationProvider.getApplicationContext()).load());
     }
@@ -96,7 +112,7 @@ public class KeysActivityTest {
 
         onData(is("test")).inAdapterView(withId(R.id.keys)).perform(tap());
         enterInDialog("abc");
-        assertEquals(TEST_DIGITS_GROUPED, waitForResult());
+        assertEquals(TEST_CODE, waitForResult());
     }
 
     @Test
@@ -117,6 +133,18 @@ public class KeysActivityTest {
         onView(withText("b")).check(doesNotExist());
         assertEquals(Collections.singletonList("c"),
                 new KeyNames(ApplicationProvider.getApplicationContext()).load());
+    }
+
+    private static String clipboardText() {
+        String[] text = {null};
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            ClipboardManager cm = (ClipboardManager) ApplicationProvider.getApplicationContext()
+                    .getSystemService(Context.CLIPBOARD_SERVICE);
+            ClipData clip = cm.getPrimaryClip();
+            if (clip != null && clip.getItemCount() > 0)
+                text[0] = String.valueOf(clip.getItemAt(0).getText());
+        });
+        return text[0];
     }
 
     private static String computing() {

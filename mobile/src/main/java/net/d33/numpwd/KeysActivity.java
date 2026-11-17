@@ -9,6 +9,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PersistableBundle;
 import android.text.InputType;
+import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.WindowManager;
@@ -30,7 +31,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
-/** Lists key names; tapping one asks for a password and shows the derived digits. */
+/**
+ * Lists key names; tapping one asks for a password and shows the six-character code with the
+ * full digit string below it.
+ */
 public class KeysActivity extends AppCompatActivity {
     private static final int RESULT_VISIBLE_MS = 60_000;
     private static final int CLIPBOARD_CLEAR_MS = 30_000;
@@ -179,41 +183,53 @@ public class KeysActivity extends AppCompatActivity {
     private void showResult(String name, String password) {
         View view = LayoutInflater.from(this).inflate(R.layout.dialog_result, null);
         TextView result = view.findViewById(R.id.result);
+        TextView resultFull = view.findViewById(R.id.result_full);
         result.setText(R.string.computing);
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle(getString(R.string.result_title, name))
                 .setView(view)
+                .setNeutralButton(R.string.copy_all, null)
                 .setNegativeButton(R.string.close, null)
                 .setPositiveButton(R.string.copy, null)
                 .create();
         secure(dialog);
+        // Set once the derivation succeeds: the full tr output, as copied by "Copy all".
         final String[] digits = {null};
         dialog.setOnShowListener(d -> {
             View copy = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            View copyAll = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
             copy.setEnabled(false);
-            copy.setOnClickListener(v -> copyToClipboard(digits[0]));
+            copyAll.setEnabled(false);
+            copy.setOnClickListener(v -> copyToClipboard(NumericPassword.sixDigits(digits[0])));
+            copyAll.setOnClickListener(v -> copyToClipboard(digits[0]));
         });
         Future<?> task = worker.submit(() -> {
             String text;
-            boolean ok;
+            String error = null;
             try {
                 text = NumericPassword.derive(name, password);
-                ok = true;
             } catch (OpensslShaCrypt.InvalidInputException e) {
-                text = getString(R.string.result_error, e.getMessage());
-                ok = false;
+                text = null;
+                error = getString(R.string.result_error, e.getMessage());
             } catch (InterruptedException e) {
                 // The dialog was closed; nobody is waiting for this result.
                 return;
             }
-            final String shown = ok ? group(text) : text;
-            final String value = ok ? text : null;
+            final String value = text;
+            final String shown = value != null ? NumericPassword.sixDigits(value) : error;
+            final String shownFull = value != null ? group(value) : "";
             handler.post(() -> {
                 if (!dialog.isShowing())
                     return;
                 digits[0] = value;
+                // "Computing…" and error messages stay small; only the code is large.
+                if (value != null)
+                    result.setTextSize(TypedValue.COMPLEX_UNIT_PX,
+                            getResources().getDimension(R.dimen.result_code_text));
                 result.setText(shown);
+                resultFull.setText(shownFull);
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(value != null);
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setEnabled(value != null);
             });
         });
         Runnable autoDismiss = dialog::dismiss;
@@ -223,6 +239,7 @@ public class KeysActivity extends AppCompatActivity {
             task.cancel(true);
             handler.removeCallbacks(autoDismiss);
             result.setText("");
+            resultFull.setText("");
         });
         dialog.show();
         handler.postDelayed(autoDismiss, RESULT_VISIBLE_MS);

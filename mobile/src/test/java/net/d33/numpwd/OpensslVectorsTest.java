@@ -26,12 +26,14 @@ public class OpensslVectorsTest {
         final byte[] password;
         final String cryptHex;
         final String digits;
+        final String code;
 
         Vector(String[] f) {
             name = hex(f[0]);
             password = hex(f[1]);
             cryptHex = f[2];
             digits = f[3];
+            code = f[4];
         }
     }
 
@@ -92,9 +94,30 @@ public class OpensslVectorsTest {
     }
 
     @Test
+    public void sixDigitsMatchHeadC6() throws Exception {
+        for (Vector v : load()) {
+            if (v.digits.equals(ERROR_MARKER))
+                continue;
+            String name = new String(v.name, StandardCharsets.UTF_8);
+            assertEquals("salt " + name, v.code, NumericPassword.sixDigits(v.digits));
+        }
+    }
+
+    @Test
     public void readmeExample() throws Exception {
         // openssl passwd -6 -salt test abc | tr -dc '[0-9]'
-        assertEquals("65955012972", NumericPassword.derive("test", "abc"));
+        String digits = NumericPassword.derive("test", "abc");
+        assertEquals("65955012972", digits);
+        // ... | head -c6
+        assertEquals("659550", NumericPassword.sixDigits(digits));
+    }
+
+    @Test
+    public void shortOutputIsShownWhole() throws Exception {
+        // openssl passwd -6 -salt test pw2002 | tr -dc '[0-9]' prints only five characters.
+        String digits = NumericPassword.derive("test", "pw2002");
+        assertEquals("62960", digits);
+        assertEquals("62960", NumericPassword.sixDigits(digits));
     }
 
     private static byte[] hex(String s) {

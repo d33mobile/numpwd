@@ -5,7 +5,8 @@ import java.util.Arrays;
 
 /**
  * Reproduces {@code openssl passwd -6 -salt KEYNAME | tr -dc '[0-9]'} with the password
- * typed at openssl's interactive prompt.
+ * typed at openssl's interactive prompt, and its first six characters
+ * ({@code ... | head -c6}).
  */
 public final class NumericPassword {
     // openssl passwd truncates longer passwords (with a warning) to this many bytes.
@@ -14,6 +15,8 @@ public final class NumericPassword {
     // The interactive prompt buffer holds PASSWORD_MAX_BYTES + 2; longer input makes
     // openssl exit with an error instead of truncating.
     static final int PROMPT_MAX_BYTES = PASSWORD_MAX_BYTES + 2;
+
+    static final int CODE_LENGTH = 6;
 
     private NumericPassword() {
     }
@@ -27,6 +30,15 @@ public final class NumericPassword {
         if (pw.length > PASSWORD_MAX_BYTES)
             pw = Arrays.copyOf(pw, PASSWORD_MAX_BYTES);
         return trDigits(OpensslShaCrypt.crypt(pw, keyName.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    /**
+     * {@code head -c6} over the output of {@link #derive}: the first six characters, '[' and ']'
+     * included, or the whole output when it is shorter (about 0.15% of passwords for a key name
+     * without digits, e.g. key "test" with password "pw2002" gives "62960").
+     */
+    public static String sixDigits(String digits) {
+        return digits.substring(0, Math.min(CODE_LENGTH, digits.length()));
     }
 
     /**

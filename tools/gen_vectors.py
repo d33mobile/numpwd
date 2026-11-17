@@ -6,12 +6,15 @@ For every (key name, password) pair the script records two things:
 - the crypt string from `openssl passwd -6 -salt NAME PASSWORD` (argv mode),
 - the digits printed by the exact pipeline the app reproduces, with the password
   typed at the interactive prompt on a pseudo-terminal:
-  `openssl passwd -6 -salt NAME | tr -dc '[0-9]'`.
+  `openssl passwd -6 -salt NAME | tr -dc '[0-9]'`,
+- the six-character code the app shows in large print, from the same output piped
+  through `head -c6`.
 
 Interactive mode matters because it rejects passwords longer than the prompt
 buffer, which argv mode silently truncates.
 
-Output is a TSV file: name_hex, password_hex, crypt_hex (or "-"), digits (or "!ERROR").
+Output is a TSV file: name_hex, password_hex, crypt_hex (or "-"), digits (or "!ERROR"),
+code (or "!ERROR").
 """
 
 import argparse
@@ -25,6 +28,7 @@ import termios
 ASCII_PRINTABLE = "".join(chr(c) for c in range(0x20, 0x7F))
 UNICODE_LETTERS = "ąćęłńóśźżĄĆĘŁŃÓŚŹŻäöüßéèñçøåжщюяΩπλ中文字日本語😀🔑"
 INTERACTIVE_TIMEOUT_S = 30
+ERROR_MARKER = "!ERROR"
 
 
 def argv_crypt_hex(name: bytes, password: bytes) -> str:
@@ -41,7 +45,8 @@ def _make_controlling_tty(slave_fd: int) -> None:
     fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
 
 
-def interactive_digits(name: bytes, password: bytes) -> str:
+def interactive_digits(name: bytes, password: bytes) -> bytes | None:
+    """Output of the tr pipeline, or None when openssl fails or prints no digits."""
     master, slave = os.openpty()
     try:
         openssl = subprocess.Popen(
@@ -57,11 +62,15 @@ def interactive_digits(name: bytes, password: bytes) -> str:
         os.close(slave)
         os.close(master)
     if openssl.returncode != 0:
-        return "!ERROR"
+        return None
     digits = subprocess.run(
         ["tr", "-dc", "[0-9]"], input=crypt_out, capture_output=True, check=True
     ).stdout
-    return digits.decode("ascii") if digits else "!ERROR"
+    return digits or None
+
+
+def head_c6(digits: bytes) -> bytes:
+    return subprocess.run(["head", "-c6"], input=digits, capture_output=True, check=True).stdout
 
 
 def random_text(rng: random.Random, alphabet: str, max_len: int) -> str:
@@ -95,6 +104,12 @@ def fixed_cases() -> list[tuple[bytes, bytes]]:
         ("0123456789abcdefXYZ", "abc"),
         ("klucz", "zażółć gęślą jaźń"),
         ("emoji", "🔑🔑🔑"),
+        # The pipeline prints only five characters for these, so head -c6 gives five.
+        ("test", "pw2002"),
+        ("test", "pw2902"),
+        # Brackets inside the first six characters of the output.
+        ("[]", "abc"),
+        ("]x[", "abc"),
     ]
     out = [(n.encode(), p.encode()) for n, p in cases]
     for length in (63, 64, 65, 127, 128, 129, 255, 256, 257, 258, 259, 300):
@@ -125,13 +140,20 @@ def main() -> int:
     rng = random.Random(args.seed)
     rows = []
     for name, password in fixed_cases() + random_cases(rng, args.count):
+        digits = interactive_digits(name, password)
         rows.append(
             "\t".join(
-                [name.hex(), password.hex(), argv_crypt_hex(name, password), interactive_digits(name, password)]
+                [
+                    name.hex(),
+                    password.hex(),
+                    argv_crypt_hex(name, password),
+                    digits.decode("ascii") if digits else ERROR_MARKER,
+                    head_c6(digits).decode("ascii") if digits else ERROR_MARKER,
+                ]
             )
         )
     with open(args.output, "w", encoding="ascii") as f:
-        f.write("# name_hex\tpassword_hex\tcrypt_argv_hex\tdigits_interactive\n")
+        f.write("# name_hex\tpassword_hex\tcrypt_argv_hex\tdigits_interactive\tcode_head_c6\n")
         f.write("\n".join(rows) + "\n")
     print("wrote %d vectors to %s" % (len(rows), args.output), file=sys.stderr)
     return 0
