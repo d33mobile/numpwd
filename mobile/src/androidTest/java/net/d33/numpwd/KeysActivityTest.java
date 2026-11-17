@@ -4,6 +4,7 @@ import static androidx.test.espresso.Espresso.onData;
 import static androidx.test.espresso.Espresso.onView;
 import static androidx.test.espresso.action.ViewActions.click;
 import static androidx.test.espresso.action.ViewActions.longClick;
+import static androidx.test.espresso.action.ViewActions.pressBack;
 import static androidx.test.espresso.action.ViewActions.replaceText;
 import static androidx.test.espresso.assertion.ViewAssertions.doesNotExist;
 import static androidx.test.espresso.assertion.ViewAssertions.matches;
@@ -20,6 +21,9 @@ import android.widget.TextView;
 
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.core.app.ApplicationProvider;
+import androidx.test.espresso.NoMatchingRootException;
+import androidx.test.espresso.NoMatchingViewException;
+import androidx.test.espresso.ViewAction;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
 import org.junit.After;
@@ -51,6 +55,11 @@ public class KeysActivityTest {
             scenario.close();
     }
 
+    /** A tap on a busy emulator can register as a long press; dismiss the key menu and retry. */
+    private static ViewAction tap() {
+        return click(pressBack());
+    }
+
     private void enterInDialog(String text) {
         onView(withId(R.id.input)).inRoot(isDialog()).perform(replaceText(text));
         onView(withId(android.R.id.button1)).inRoot(isDialog()).perform(click());
@@ -63,12 +72,29 @@ public class KeysActivityTest {
 
         onView(withId(R.id.fab_add)).perform(click());
         enterInDialog("test");
-        onData(is("test")).inAdapterView(withId(R.id.keys)).perform(click());
+        onData(is("test")).inAdapterView(withId(R.id.keys)).perform(tap());
         enterInDialog("abc");
 
         assertEquals(TEST_DIGITS_GROUPED, waitForResult());
         assertEquals(Collections.singletonList("test"),
                 new KeyNames(ApplicationProvider.getApplicationContext()).load());
+    }
+
+    @Test
+    public void closingSlowDerivationDoesNotBlockTheNextOne() {
+        // openssl needs minutes for the maximum round count; the app must not.
+        String slowKey = "rounds=999999999$x";
+        new KeyNames(ApplicationProvider.getApplicationContext()).save(Arrays.asList(slowKey, "test"));
+        scenario = ActivityScenario.launch(KeysActivity.class);
+
+        onData(is(slowKey)).inAdapterView(withId(R.id.keys)).perform(tap());
+        enterInDialog("abc");
+        assertEquals(computing(), readResultWhenShown());
+        onView(withId(android.R.id.button2)).inRoot(isDialog()).perform(click());
+
+        onData(is("test")).inAdapterView(withId(R.id.keys)).perform(tap());
+        enterInDialog("abc");
+        assertEquals(TEST_DIGITS_GROUPED, waitForResult());
     }
 
     @Test
@@ -91,18 +117,44 @@ public class KeysActivityTest {
                 new KeyNames(ApplicationProvider.getApplicationContext()).load());
     }
 
-    /** The digits are computed off the main thread, which Espresso does not wait for. */
-    private String waitForResult() {
-        String computing = ApplicationProvider.getApplicationContext().getString(R.string.computing);
-        long deadline = SystemClock.uptimeMillis() + RESULT_TIMEOUT_MS;
-        String[] text = {computing};
-        while (SystemClock.uptimeMillis() < deadline) {
+    private static String computing() {
+        return ApplicationProvider.getApplicationContext().getString(R.string.computing);
+    }
+
+    /** Text of the result dialog, or null while that dialog is not on screen yet. */
+    private static String readResult() {
+        String[] text = {null};
+        try {
             onView(withId(R.id.result)).inRoot(isDialog())
-                    .check((view, e) -> text[0] = String.valueOf(((TextView) view).getText()));
-            if (!computing.equals(text[0]))
-                return text[0];
-            SystemClock.sleep(100);
+                    .check((view, e) -> {
+                        if (view != null)
+                            text[0] = String.valueOf(((TextView) view).getText());
+                    });
+        } catch (NoMatchingRootException | NoMatchingViewException e) {
+            return null;
         }
         return text[0];
+    }
+
+    /** The result dialog opens after the password dialog has gone, which can take a while. */
+    private static String readResultWhenShown() {
+        long deadline = SystemClock.uptimeMillis() + RESULT_TIMEOUT_MS;
+        String text = readResult();
+        while (text == null && SystemClock.uptimeMillis() < deadline) {
+            SystemClock.sleep(100);
+            text = readResult();
+        }
+        return text;
+    }
+
+    /** The digits are computed off the main thread, which Espresso does not wait for. */
+    private static String waitForResult() {
+        long deadline = SystemClock.uptimeMillis() + RESULT_TIMEOUT_MS;
+        String text = readResult();
+        while ((text == null || computing().equals(text)) && SystemClock.uptimeMillis() < deadline) {
+            SystemClock.sleep(100);
+            text = readResult();
+        }
+        return text;
     }
 }

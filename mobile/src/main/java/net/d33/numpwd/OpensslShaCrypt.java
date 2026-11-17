@@ -34,8 +34,13 @@ public final class OpensslShaCrypt {
         }
     }
 
-    /** Returns the full "$6$..." string that {@code openssl passwd -6 -salt SALT PASSWORD} prints. */
-    public static byte[] crypt(byte[] password, byte[] salt) throws InvalidInputException {
+    /**
+     * Returns the full "$6$..." string that {@code openssl passwd -6 -salt SALT PASSWORD} prints.
+     * A "rounds=" prefix can make this run for minutes, so the rounds loop stops with
+     * InterruptedException once the calling thread is interrupted.
+     */
+    public static byte[] crypt(byte[] password, byte[] salt)
+            throws InvalidInputException, InterruptedException {
         if (password.length == 0)
             throw new InvalidInputException("empty password");
         if (indexOf(password, (byte) 0, 0) >= 0 || indexOf(salt, (byte) 0, 0) >= 0)
@@ -69,7 +74,7 @@ public final class OpensslShaCrypt {
         return out.toByteArray();
     }
 
-    private static byte[] shaCrypt512(byte[] p, byte[] s, int rounds) {
+    private static byte[] shaCrypt512(byte[] p, byte[] s, int rounds) throws InterruptedException {
         MessageDigest md = sha512();
 
         md.update(p);
@@ -100,6 +105,8 @@ public final class OpensslShaCrypt {
         byte[] sBytes = Arrays.copyOf(md.digest(), s.length);
 
         for (int i = 0; i < rounds; i++) {
+            if (Thread.interrupted())
+                throw new InterruptedException();
             md.update((i & 1) != 0 ? pBytes : a);
             if (i % 3 != 0)
                 md.update(sBytes);

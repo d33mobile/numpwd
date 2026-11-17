@@ -18,7 +18,8 @@ public final class NumericPassword {
     private NumericPassword() {
     }
 
-    public static String derive(String keyName, String password) throws OpensslShaCrypt.InvalidInputException {
+    public static String derive(String keyName, String password)
+            throws OpensslShaCrypt.InvalidInputException, InterruptedException {
         byte[] pw = password.getBytes(StandardCharsets.UTF_8);
         if (pw.length > PROMPT_MAX_BYTES)
             throw new OpensslShaCrypt.InvalidInputException(

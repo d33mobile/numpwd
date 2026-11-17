@@ -28,6 +28,7 @@ import com.google.android.material.textfield.TextInputLayout;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /** Lists key names; tapping one asks for a password and shows the derived digits. */
 public class KeysActivity extends AppCompatActivity {
@@ -192,15 +193,7 @@ public class KeysActivity extends AppCompatActivity {
             copy.setEnabled(false);
             copy.setOnClickListener(v -> copyToClipboard(digits[0]));
         });
-        Runnable autoDismiss = dialog::dismiss;
-        dialog.setOnDismissListener(d -> {
-            handler.removeCallbacks(autoDismiss);
-            result.setText("");
-        });
-        dialog.show();
-        handler.postDelayed(autoDismiss, RESULT_VISIBLE_MS);
-
-        worker.execute(() -> {
+        Future<?> task = worker.submit(() -> {
             String text;
             boolean ok;
             try {
@@ -209,6 +202,9 @@ public class KeysActivity extends AppCompatActivity {
             } catch (OpensslShaCrypt.InvalidInputException e) {
                 text = getString(R.string.result_error, e.getMessage());
                 ok = false;
+            } catch (InterruptedException e) {
+                // The dialog was closed; nobody is waiting for this result.
+                return;
             }
             final String shown = ok ? group(text) : text;
             final String value = ok ? text : null;
@@ -220,6 +216,16 @@ public class KeysActivity extends AppCompatActivity {
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(value != null);
             });
         });
+        Runnable autoDismiss = dialog::dismiss;
+        dialog.setOnDismissListener(d -> {
+            // A large "rounds=" key name can compute for minutes and would hold up the single
+            // worker thread, so every later derivation would wait behind it.
+            task.cancel(true);
+            handler.removeCallbacks(autoDismiss);
+            result.setText("");
+        });
+        dialog.show();
+        handler.postDelayed(autoDismiss, RESULT_VISIBLE_MS);
     }
 
     private static String group(String digits) {
