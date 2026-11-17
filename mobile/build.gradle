@@ -4,17 +4,28 @@ android {
     compileSdk 35
     namespace 'org.fedorahosted.freeotp'
     defaultConfig {
-        applicationId "org.fedorahosted.freeotp"
+        applicationId "net.d33.numpwd"
         minSdkVersion 23
         targetSdkVersion 35
-        versionCode 48
-        versionName "2.0.6"
+        versionCode 1
+        versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         testInstrumentationRunnerArguments clearPackageData: 'true'
         multiDexEnabled = true
     }
+    signingConfigs {
+        release {
+            // Release signing comes from the environment so the keystore never enters the repo.
+            storeFile System.getenv('NUMPWD_KEYSTORE') ? file(System.getenv('NUMPWD_KEYSTORE')) : null
+            storePassword System.getenv('NUMPWD_KEYSTORE_PASS')
+            keyAlias System.getenv('NUMPWD_KEY_ALIAS')
+            keyPassword System.getenv('NUMPWD_KEY_PASS')
+        }
+    }
     buildTypes {
         release {
+            if (System.getenv('NUMPWD_KEYSTORE'))
+                signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="keys_empty">No keys yet.\nTap + to add a key name.</string>
+    <string name="key_add">Add key</string>
+    <string name="key_rename">Rename key</string>
+    <string name="key_delete">Delete key</string>
+    <string name="key_delete_confirm">Delete key \"%1$s\"? Only the name is stored, so this cannot lose a secret.</string>
+    <string name="key_name_hint">Key name (used as the salt)</string>
+    <string name="key_name_exists">A key with this name already exists</string>
+    <string name="key_name_invalid">The name must not be empty or contain line breaks</string>
+    <string name="password_title">Password for \"%1$s\"</string>
+    <string name="password_hint">Password</string>
+    <string name="result_title">Digits for \"%1$s\"</string>
+    <string name="result_hint">openssl passwd -6 -salt KEY | tr -dc \'[0-9]\'</string>
+    <string name="result_error">openssl would print no digits: %1$s</string>
+    <string name="computing">Computing…</string>
+    <string name="copy">Copy</string>
+    <string name="copied">Copied, the clipboard is cleared in %1$d s</string>
+    <string name="rename">Rename</string>
+</resources>

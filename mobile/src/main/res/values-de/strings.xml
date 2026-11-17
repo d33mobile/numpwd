@@ -19,7 +19,6 @@
    -->
 
 <resources>
-    <string name="app_name">FreeOTP</string>
 
     <!-- Buttons -->
     <string name="ok">Ok</string>
