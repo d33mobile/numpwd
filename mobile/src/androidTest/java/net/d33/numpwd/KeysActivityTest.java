@@ -39,7 +39,9 @@ import java.util.Collections;
 public class KeysActivityTest {
     // openssl passwd -6 -salt test abc | tr -dc '[0-9]' -> 65955012972, shown in groups of four.
     private static final String TEST_DIGITS_GROUPED = "6595 5012 972";
-    private static final long RESULT_TIMEOUT_MS = 10_000;
+    // Generous because a loaded emulator can take several seconds per dialog transition;
+    // without cancellation the second derivation would still wait for many minutes.
+    private static final long RESULT_TIMEOUT_MS = 30_000;
 
     private ActivityScenario<KeysActivity> scenario;
 
