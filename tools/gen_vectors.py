@@ -29,7 +29,7 @@ INTERACTIVE_TIMEOUT_S = 30
 
 def argv_crypt_hex(name: bytes, password: bytes) -> str:
     out = subprocess.run(
-        ["openssl", "passwd", "-6", "-salt", name, password],
+        ["openssl", "passwd", "-6", "-salt", name, "--", password],
         capture_output=True,
         check=True,
     ).stdout.rstrip(b"\n")
