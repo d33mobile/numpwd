@@ -67,6 +67,11 @@ public class KeysActivity extends AppCompatActivity {
     private AppSettings settings;
     private List<String> names;
     private ArrayAdapter<String> adapter;
+    // The system prompt on screen, if any, and the typed password waiting for its outcome.
+    @Nullable
+    private BiometricPrompt prompt;
+    @Nullable
+    private byte[] passwordAwaitingPrompt;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -94,6 +99,10 @@ public class KeysActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        // The system prompt would outlive a rotation and report to this destroyed activity.
+        if (prompt != null)
+            prompt.cancelAuthentication();
+        wipePasswordAwaitingPrompt();
         worker.shutdownNow();
         handler.removeCallbacksAndMessages(null);
         super.onDestroy();
@@ -257,6 +266,8 @@ public class KeysActivity extends AppCompatActivity {
                 new BiometricPrompt.AuthenticationCallback() {
             @Override
             public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                if (isGone())
+                    return;
                 byte[] password;
                 try {
                     password = remembered.read(name, authenticatedCipher(result));
@@ -272,7 +283,7 @@ public class KeysActivity extends AppCompatActivity {
             @Override
             public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
                 // Cancelled, "Type the password", lockout, ...: typing the password always works.
-                if (!isFinishing())
+                if (!isGone())
                     askPassword(name, null);
             }
         });
@@ -342,10 +353,16 @@ public class KeysActivity extends AppCompatActivity {
             showResult(name, password);
             return;
         }
+        passwordAwaitingPrompt = password;
         authenticate(cipher, getString(R.string.remember_prompt_title, name), R.string.prompt_do_not_remember,
                 new BiometricPrompt.AuthenticationCallback() {
             @Override
             public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                if (isGone()) {
+                    Arrays.fill(password, (byte) 0);
+                    return;
+                }
+                passwordAwaitingPrompt = null;
                 try {
                     remembered.save(name, authenticatedCipher(result), password.clone());
                 } catch (GeneralSecurityException e) {
@@ -357,13 +374,26 @@ public class KeysActivity extends AppCompatActivity {
 
             @Override
             public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
-                notRemembered(errString.toString());
-                if (!isFinishing())
-                    showResult(name, password);
-                else
+                if (isGone()) {
                     Arrays.fill(password, (byte) 0);
+                    return;
+                }
+                passwordAwaitingPrompt = null;
+                notRemembered(errString.toString());
+                showResult(name, password);
             }
         });
+    }
+
+    /** Whether a prompt result arrives too late for this activity to show anything. */
+    private boolean isGone() {
+        return isFinishing() || isDestroyed();
+    }
+
+    private void wipePasswordAwaitingPrompt() {
+        if (passwordAwaitingPrompt != null)
+            Arrays.fill(passwordAwaitingPrompt, (byte) 0);
+        passwordAwaitingPrompt = null;
     }
 
     private void notRemembered(String reason) {
@@ -381,8 +411,8 @@ public class KeysActivity extends AppCompatActivity {
                 .setAllowedAuthenticators(Biometrics.AUTHENTICATORS)
                 .setNegativeButtonText(getString(negativeButton))
                 .build();
-        new BiometricPrompt(this, ContextCompat.getMainExecutor(this), callback)
-                .authenticate(info, new BiometricPrompt.CryptoObject(cipher));
+        prompt = new BiometricPrompt(this, ContextCompat.getMainExecutor(this), callback);
+        prompt.authenticate(info, new BiometricPrompt.CryptoObject(cipher));
     }
 
     private static Cipher authenticatedCipher(BiometricPrompt.AuthenticationResult result)

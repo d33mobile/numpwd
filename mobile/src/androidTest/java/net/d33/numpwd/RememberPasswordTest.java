@@ -133,6 +133,46 @@ public class RememberPasswordTest {
         assertTrue("cancelling must not forget the password", remembered().has("test"));
     }
 
+    /**
+     * The system prompt belongs to the activity that started it. A rotation replaces that
+     * activity, so the prompt has to go with it; a finger afterwards must not reach the old one.
+     */
+    @Test
+    public void recreationDuringTheUnlockPromptCancelsIt() throws Exception {
+        rememberTestAbc();
+
+        tapAndWaitForUnlockPrompt();
+        scenario.recreate();
+        EmulatorBiometrics.touch(EmulatorBiometrics.ENROLLED_FINGER);
+        assertTrue("the unlock prompt outlived its activity",
+                EmulatorBiometrics.waitUntilGone(string(R.string.unlock_prompt_title, "test")));
+        assertNull("the code was shown without a prompt", KeysActivityTest.readResult());
+
+        // The new activity unlocks as usual.
+        tapAndWaitForUnlockPrompt();
+        EmulatorBiometrics.touch(EmulatorBiometrics.ENROLLED_FINGER);
+        assertEquals(KeysActivityTest.TEST_CODE, KeysActivityTest.waitForResult());
+    }
+
+    @Test
+    public void recreationDuringTheRememberPromptDoesNotRemember() throws Exception {
+        onData(is("test")).inAdapterView(withId(R.id.keys)).perform(KeysActivityTest.tap());
+        onView(withId(R.id.remember)).inRoot(isDialog()).perform(click());
+        KeysActivityTest.enterInDialog("abc");
+        String title = string(R.string.remember_prompt_title, "test");
+        assertNotNull("no prompt to remember the password", EmulatorBiometrics.waitForText(title));
+
+        scenario.recreate();
+        EmulatorBiometrics.touch(EmulatorBiometrics.ENROLLED_FINGER);
+        assertTrue("the remember prompt outlived its activity", EmulatorBiometrics.waitUntilGone(title));
+        assertFalse(remembered().has("test"));
+
+        // The new activity asks for the password again.
+        onData(is("test")).inAdapterView(withId(R.id.keys)).perform(KeysActivityTest.tap());
+        KeysActivityTest.enterInDialog("abc");
+        assertEquals(KeysActivityTest.TEST_CODE, KeysActivityTest.waitForResult());
+    }
+
     @Test
     public void forgetPasswordFromKeyMenu() throws Exception {
         rememberTestAbc();

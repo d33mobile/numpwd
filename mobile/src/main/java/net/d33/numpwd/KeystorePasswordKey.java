@@ -4,11 +4,12 @@ import android.os.Build;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyPermanentlyInvalidatedException;
 import android.security.keystore.KeyProperties;
-import android.security.keystore.StrongBoxUnavailableException;
 
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
+import java.security.ProviderException;
+import java.security.UnrecoverableKeyException;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
@@ -72,7 +73,12 @@ final class KeystorePasswordKey implements PasswordKey {
     }
 
     private static SecretKey existingKey() throws GeneralSecurityException {
-        return (SecretKey) keyStore().getKey(ALIAS, null);
+        try {
+            return (SecretKey) keyStore().getKey(ALIAS, null);
+        } catch (UnrecoverableKeyException e) {
+            // Some Android versions report an invalidated key here instead of when it is used.
+            throw new KeyInvalidatedException(e);
+        }
     }
 
     private static SecretKey generate() throws GeneralSecurityException {
@@ -81,8 +87,9 @@ final class KeystorePasswordKey implements PasswordKey {
             try {
                 generator.init(spec(true));
                 return generator.generateKey();
-            } catch (StrongBoxUnavailableException e) {
-                // Most devices have no StrongBox chip; the TEE-backed key below is the usual case.
+            } catch (ProviderException e) {
+                // StrongBoxUnavailableException on the many devices without a StrongBox chip; some
+                // chips refuse with a plain ProviderException. The TEE-backed key below is the usual case.
             }
         }
         generator.init(spec(false));

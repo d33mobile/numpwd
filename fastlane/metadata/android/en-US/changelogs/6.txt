@@ -1,0 +1,2 @@
+* Fixed a crash when the screen rotated while the fingerprint prompt was open. The prompt now closes together with the screen that opened it.
+* A failure of the phone's secure hardware no longer crashes the app; numpwd asks for the password.

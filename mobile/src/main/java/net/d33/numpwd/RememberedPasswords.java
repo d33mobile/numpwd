@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import java.security.GeneralSecurityException;
+import java.security.ProviderException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
@@ -59,10 +60,14 @@ public final class RememberedPasswords {
     /** An invalidated key cannot decrypt anything any more, so it is replaced along with what it encrypted. */
     public Cipher cipherForSaving() throws GeneralSecurityException {
         try {
-            return key.encryptCipher();
-        } catch (KeyInvalidatedException e) {
-            forgetAll();
-            return key.encryptCipher();
+            try {
+                return key.encryptCipher();
+            } catch (KeyInvalidatedException e) {
+                forgetAll();
+                return key.encryptCipher();
+            }
+        } catch (ProviderException e) {
+            throw checked(e);
         }
     }
 
@@ -71,6 +76,8 @@ public final class RememberedPasswords {
         try {
             byte[] ciphertext = authenticated.doFinal(passwordUtf8);
             store.put(name, Hex.encode(authenticated.getIV()) + IV_SEPARATOR + Hex.encode(ciphertext));
+        } catch (ProviderException e) {
+            throw checked(e);
         } finally {
             Arrays.fill(passwordUtf8, (byte) 0);
         }
@@ -87,12 +94,18 @@ public final class RememberedPasswords {
         } catch (KeyInvalidatedException e) {
             forgetAll();
             throw e;
+        } catch (ProviderException e) {
+            throw checked(e);
         }
     }
 
     /** The remembered password as UTF-8; the caller overwrites it once used. */
     public byte[] read(String name, Cipher authenticated) throws GeneralSecurityException {
-        return authenticated.doFinal(parse(name)[1]);
+        try {
+            return authenticated.doFinal(parse(name)[1]);
+        } catch (ProviderException e) {
+            throw checked(e);
+        }
     }
 
     public void forget(String name) {
@@ -111,6 +124,11 @@ public final class RememberedPasswords {
     public void forgetAll() throws GeneralSecurityException {
         store.clear();
         key.delete();
+    }
+
+    /** The Keystore reports some failures, e.g. of the secure hardware, as unchecked exceptions. */
+    private static GeneralSecurityException checked(ProviderException e) {
+        return new GeneralSecurityException(e);
     }
 
     /** The stored IV and ciphertext. */

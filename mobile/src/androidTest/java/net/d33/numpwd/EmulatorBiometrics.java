@@ -149,6 +149,12 @@ final class EmulatorBiometrics {
         return device().wait(Until.findObject(By.text(pattern)), UI_TIMEOUT_MS);
     }
 
+    /** Whether the system window showing the given text went away in time. */
+    static boolean waitUntilGone(String text) {
+        Pattern pattern = Pattern.compile(Pattern.quote(text), Pattern.CASE_INSENSITIVE);
+        return device().wait(Until.gone(By.text(pattern)), UI_TIMEOUT_MS);
+    }
+
     static boolean isShown(BySelector selector) {
         return device().hasObject(selector);
     }

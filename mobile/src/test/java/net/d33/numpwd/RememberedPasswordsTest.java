@@ -10,7 +10,12 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.security.AlgorithmParameters;
 import java.security.GeneralSecurityException;
+import java.security.Key;
+import java.security.ProviderException;
+import java.security.SecureRandom;
+import java.security.spec.AlgorithmParameterSpec;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -20,9 +25,11 @@ import java.util.Set;
 
 import javax.crypto.AEADBadTagException;
 import javax.crypto.Cipher;
+import javax.crypto.CipherSpi;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 
 /**
  * Storage of remembered passwords, with a software AES key standing in for the Android
@@ -37,9 +44,13 @@ public class RememberedPasswordsTest {
     private static final class FakeKey implements PasswordKey {
         SecretKey key;
         boolean invalidated;
+        boolean providerFails;
         int deletions;
 
         private SecretKey key() throws GeneralSecurityException {
+            // The Keystore reports some failures (e.g. of the secure hardware) unchecked.
+            if (providerFails)
+                throw new ProviderException("keystore operation failed");
             if (invalidated)
                 throw new KeyInvalidatedException(new GeneralSecurityException("enrolment changed"));
             if (key == null) {
@@ -232,5 +243,105 @@ public class RememberedPasswordsTest {
     public void corruptEntryIsReportedNotDecrypted() {
         store.map.put("test", "not hex");
         assertThrows(GeneralSecurityException.class, () -> remembered.cipherForReading("test"));
+    }
+
+    @Test
+    public void uncheckedKeystoreFailureIsReportedAsChecked() throws Exception {
+        remember("a", "1");
+        key.providerFails = true;
+
+        GeneralSecurityException reading = assertThrows(GeneralSecurityException.class,
+                () -> remembered.cipherForReading("a"));
+        assertFalse(reading instanceof KeyInvalidatedException);
+        assertThrows(GeneralSecurityException.class, remembered::cipherForSaving);
+        // Nothing says the key is lost, so the entry stays.
+        assertTrue(remembered.has("a"));
+        assertEquals(0, key.deletions);
+    }
+
+    /** Stands in for a Keystore cipher whose hardware operation fails at the last step. */
+    private static final class FailingCipherSpi extends CipherSpi {
+        @Override
+        protected void engineSetMode(String mode) {
+        }
+
+        @Override
+        protected void engineSetPadding(String padding) {
+        }
+
+        @Override
+        protected int engineGetBlockSize() {
+            return 0;
+        }
+
+        @Override
+        protected int engineGetOutputSize(int inputLen) {
+            return inputLen;
+        }
+
+        @Override
+        protected byte[] engineGetIV() {
+            return new byte[12];
+        }
+
+        @Override
+        protected AlgorithmParameters engineGetParameters() {
+            return null;
+        }
+
+        @Override
+        protected void engineInit(int opmode, Key k, SecureRandom random) {
+        }
+
+        @Override
+        protected void engineInit(int opmode, Key k,
+                                  AlgorithmParameterSpec params,
+                                  SecureRandom random) {
+        }
+
+        @Override
+        protected void engineInit(int opmode, Key k, AlgorithmParameters params,
+                                  SecureRandom random) {
+        }
+
+        @Override
+        protected byte[] engineUpdate(byte[] input, int inputOffset, int inputLen) {
+            return new byte[0];
+        }
+
+        @Override
+        protected int engineUpdate(byte[] input, int inputOffset, int inputLen, byte[] output, int outputOffset) {
+            return 0;
+        }
+
+        @Override
+        protected byte[] engineDoFinal(byte[] input, int inputOffset, int inputLen) {
+            throw new ProviderException("keystore operation failed");
+        }
+
+        @Override
+        protected int engineDoFinal(byte[] input, int inputOffset, int inputLen, byte[] output, int outputOffset) {
+            throw new ProviderException("keystore operation failed");
+        }
+    }
+
+    private static final class FailingCipher extends Cipher {
+        FailingCipher() throws GeneralSecurityException {
+            // A Cipher needs a provider the runtime trusts; the real one's will do.
+            super(new FailingCipherSpi(), Cipher.getInstance(TRANSFORMATION).getProvider(), "failing");
+            init(Cipher.ENCRYPT_MODE, new SecretKeySpec(new byte[32], "AES"));
+        }
+    }
+
+    @Test
+    public void uncheckedFailureWhileEncryptingOrDecryptingIsReportedAsChecked() throws Exception {
+        remember("a", "1");
+        byte[] password = utf8("abc");
+
+        Cipher failing = new FailingCipher();
+        assertThrows(GeneralSecurityException.class, () -> remembered.save("b", failing, password));
+        assertArrayEquals("the plaintext must be wiped after a failed save too", new byte[3], password);
+        assertFalse(remembered.has("b"));
+        assertThrows(GeneralSecurityException.class, () -> remembered.read("a", failing));
     }
 }
