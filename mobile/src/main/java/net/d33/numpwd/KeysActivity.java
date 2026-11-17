@@ -13,6 +13,7 @@ import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.inputmethod.EditorInfo;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -152,11 +153,17 @@ public class KeysActivity extends AppCompatActivity {
         TextInputLayout layout = view.findViewById(R.id.input_layout);
         TextInputEditText input = view.findViewById(R.id.input);
         layout.setHint(getString(R.string.password_hint));
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        layout.setEndIconMode(TextInputLayout.END_ICON_PASSWORD_TOGGLE);
-        // A password manager must not offer to save the master password.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        // After setInputType, which installs the platform transformation that briefly shows the
+        // last typed character. There is no show/hide toggle: the password is never displayed.
+        input.setTransformationMethod(new HiddenPasswordTransformation());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // The keyboard must not learn the password (the flag exists since API 26).
+            input.setImeOptions(input.getImeOptions() | EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
+            // A password manager must not offer to save the master password.
             view.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+        }
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle(getString(R.string.password_title, name))

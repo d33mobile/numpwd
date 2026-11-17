@@ -18,7 +18,12 @@ import static org.junit.Assert.assertEquals;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
+import android.text.InputType;
+import android.view.KeyEvent;
+import android.view.inputmethod.EditorInfo;
+import android.widget.EditText;
 import android.widget.TextView;
 
 import androidx.test.core.app.ActivityScenario;
@@ -29,11 +34,15 @@ import androidx.test.espresso.ViewAction;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
+import com.google.android.material.textfield.TextInputLayout;
+
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.Arrays;
 import java.util.Collections;
 
@@ -51,6 +60,7 @@ public class KeysActivityTest {
     // Generous because a loaded emulator can take several seconds per dialog transition;
     // without cancellation the second derivation would still wait for many minutes.
     private static final long RESULT_TIMEOUT_MS = 30_000;
+    private static final char PASSWORD_DOT = '\u2022';
 
     private ActivityScenario<KeysActivity> scenario;
 
@@ -116,6 +126,34 @@ public class KeysActivityTest {
     }
 
     @Test
+    public void passwordFieldNeverShowsTypedCharacters() throws Exception {
+        // The system default; with it, a plain password field shows the last typed character.
+        shell("settings put system show_password 1");
+        new KeyNames(ApplicationProvider.getApplicationContext()).save(Collections.singletonList("test"));
+        scenario = ActivityScenario.launch(KeysActivity.class);
+
+        onData(is("test")).inAdapterView(withId(R.id.keys)).perform(tap());
+        // A real key press, like typing on a keyboard; setText would not trigger the reveal.
+        onView(withId(R.id.input)).inRoot(isDialog()).check(matches(isDisplayed()));
+        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_Q);
+        onView(withId(R.id.input)).inRoot(isDialog()).check((view, e) -> {
+            EditText input = (EditText) view;
+            assertEquals("q", String.valueOf(input.getText()));
+            assertEquals(String.valueOf(PASSWORD_DOT), String.valueOf(input.getLayout().getText()));
+            int ime = input.getImeOptions();
+            assertEquals(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING,
+                    ime & EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
+            int type = input.getInputType();
+            assertEquals(InputType.TYPE_TEXT_VARIATION_PASSWORD,
+                    type & InputType.TYPE_MASK_VARIATION);
+            assertEquals(InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS,
+                    type & InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        });
+        onView(withId(R.id.input_layout)).inRoot(isDialog()).check((view, e) ->
+                assertEquals(TextInputLayout.END_ICON_NONE, ((TextInputLayout) view).getEndIconMode()));
+    }
+
+    @Test
     public void renameAndDeleteKey() {
         new KeyNames(ApplicationProvider.getApplicationContext()).save(Arrays.asList("a", "b"));
         scenario = ActivityScenario.launch(KeysActivity.class);
@@ -133,6 +171,18 @@ public class KeysActivityTest {
         onView(withText("b")).check(doesNotExist());
         assertEquals(Collections.singletonList("c"),
                 new KeyNames(ApplicationProvider.getApplicationContext()).load());
+    }
+
+    /** Runs a shell command and waits for it by reading its output to the end. */
+    private static void shell(String command) throws IOException {
+        try (ParcelFileDescriptor out = InstrumentationRegistry.getInstrumentation().getUiAutomation()
+                .executeShellCommand(command);
+             InputStream in = new ParcelFileDescriptor.AutoCloseInputStream(out)) {
+            byte[] buffer = new byte[256];
+            while (in.read(buffer) >= 0) {
+                // drain
+            }
+        }
     }
 
     private static String clipboardText() {
