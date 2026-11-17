@@ -1,46 +1,81 @@
-[![Build Status](https://github.com/freeotp/freeotp-android/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/freeotp/freeotp-android/actions/workflows/build.yml)
+# numpwd
 
-# FreeOTP
+Android app that derives numeric passwords from a key name and a password,
+compatible with `openssl passwd -6`.
 
-[FreeOTP](https://freeotp.github.io) is a two-factor authentication application for systems
-utilizing one-time password protocols. Tokens can be added easily by scanning a QR code.
+## What it does
 
-FreeOTP implements open standards:
+The app keeps a list of key names. Tap a key, type a password, and numpwd
+shows the digits that this pipeline prints for the same password typed at the
+openssl prompt:
 
-* HOTP (HMAC-Based One-Time Password Algorithm) [RFC 4226](https://www.ietf.org/rfc/rfc4226.txt)
-* TOTP (Time-Based One-Time Password Algorithm) [RFC 6238](https://www.ietf.org/rfc/rfc6238.txt)
+```sh
+openssl passwd -6 -salt KEYNAME | tr -dc '[0-9]'
+```
 
-This means that no proprietary server-side component is necessary: use any server-side component that implements these standards.
+For example, key `test` with password `abc` gives `65955012972`. The app
+groups the digits in fours for reading and copies them without spaces.
 
-## Screenshots
-<img src="screenshots/1.png" alt="FreeOTP screenshot 1" width="200" /> &nbsp;<img src="screenshots/2.png" alt="FreeOTP screenshot 2" width="200" /> &nbsp;<img src="screenshots/3.png" alt="FreeOTP screenshot 3" width="200" /> &nbsp;<img src="screenshots/4.png" alt="FreeOTP screenshot 4" width="200" />
+Because the result is a plain OpenSSL computation, you can recompute any
+password on a computer without the app.
 
-## Download FreeOTP for Android
+## Features
 
-* [F-Droid](https://f-droid.org/packages/org.fedorahosted.freeotp)
-* [Google Play](https://play.google.com/store/apps/details?id=org.fedorahosted.freeotp)
+- Only key names are stored. The password is never saved or logged and is
+  excluded from autofill.
+- The password and result dialogs set `FLAG_SECURE`, so they do not appear in
+  screenshots or screen recordings. The key list can still be captured.
+- Copy button. The clipboard is cleared after 30 seconds if it still holds the
+  digits, and the result closes after a minute.
+- No permissions and no network access. Android backup includes only the key
+  name list.
 
-<a href="https://f-droid.org/packages/org.fedorahosted.freeotp/" target="_blank">
-<img src="https://f-droid.org/badge/get-it-on.png" alt="Get it on F-Droid" height="60"/></a>
-<a href="https://play.google.com/store/apps/details?id=org.fedorahosted.freeotp" target="_blank">
-<img src="https://play.google.com/intl/en_us/badges/images/generic/en-play-badge.png" alt="Get it on Google Play" height="60"/></a>
+## Compatibility notes
 
-## Contributing
+- OpenSSL takes the salt as raw UTF-8 bytes and cuts it to 16 bytes, keeps `$`
+  in it and accepts a `rounds=N$` prefix. numpwd ports this from
+  `apps/passwd.c` instead of using a generic SHA-512 crypt library, which
+  would reject such salts.
+- The interactive prompt keeps at most 256 bytes of the password and fails on
+  input longer than 258 bytes. numpwd does the same.
+- `tr -dc '[0-9]'` also keeps `[` and `]`, because the brackets are part of
+  the character set. A key name containing brackets therefore shows them in
+  the result too.
 
-Pull requests on GitHub are welcome under the Apache 2.0 license, see [CONTRIBUTING](CONTRIBUTING.md) for more details.
+`tools/gen_vectors.py` generates test vectors from the openssl binary;
+`mobile/src/test/resources/openssl_vectors.tsv` holds the committed set.
 
-## Permissions
+## Install
 
-The FreeOTP app uses the following permissions
+Add the F-Droid repository
+<https://d33mobile.github.io/numpwd-fdroid/repo> (fingerprint
+`3f59cdb18ac033fb4d7fa118231442a4504c3721b68bab196c60b717f3e392f3`) or open
+<https://d33mobile.github.io/numpwd-fdroid/> on the phone.
 
-| Permission | Usage                    | Required | Permission type |
-|------------|--------------------------|----------|-----------------|
-| Camera     | Recognition of QR codes  | No       | Dangerous       |
-| Internet   | Token image provisioning | No       | Normal          |
+## Build
 
-## Alternatives
+Requires JDK 17 or newer and the Android SDK (platform 36).
 
-Here are some open-source alternative apps providing similar functionality:
-- [Aegis](https://github.com/beemdevelopment/Aegis)
-- [FreeOTP+](https://github.com/helloworld1/FreeOTPPlus)
-- [Proton Authenticator](https://github.com/protonpass/android-authenticator)
+```sh
+./gradlew :mobile:assembleDebug
+```
+
+Release builds are signed when `NUMPWD_KEYSTORE`, `NUMPWD_KEYSTORE_PASS`,
+`NUMPWD_KEY_ALIAS` and `NUMPWD_KEY_PASS` are set.
+
+## Tests
+
+```sh
+./gradlew :mobile:testDebugUnitTest          # crypt vectors, key name rules
+./gradlew :mobile:connectedDebugAndroidTest  # UI test on a device or emulator
+scripts/ci-vector-check.sh 1234              # regenerate vectors with the local openssl
+```
+
+CI (`.github/workflows/build.yml`) runs all three plus Android lint.
+
+## License
+
+numpwd is a fork of [FreeOTP for Android](https://github.com/freeotp/freeotp-android)
+by Red Hat and contributors, and like it is licensed under the Apache License 2.0
+(see [COPYING](COPYING)). The OTP features were removed; the git history keeps
+the upstream authorship.
