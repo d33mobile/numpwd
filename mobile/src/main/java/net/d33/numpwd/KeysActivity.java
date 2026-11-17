@@ -8,33 +8,52 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PersistableBundle;
+import android.text.Editable;
 import android.text.InputType;
 import android.util.TypedValue;
 import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.widget.ArrayAdapter;
+import android.widget.CheckBox;
 import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.content.res.AppCompatResources;
 import androidx.appcompat.widget.Toolbar;
+import androidx.biometric.BiometricPrompt;
+import androidx.core.content.ContextCompat;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
 
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import javax.crypto.Cipher;
+
 /**
- * Lists key names; tapping one asks for a password and shows the six-character code with the
- * full digit string below it.
+ * Lists key names; tapping one asks for a password (or unlocks a remembered one with the
+ * fingerprint) and shows the six-character code with the full digit string
+ * below it.
  */
 public class KeysActivity extends AppCompatActivity {
     private static final int RESULT_VISIBLE_MS = 60_000;
@@ -44,6 +63,8 @@ public class KeysActivity extends AppCompatActivity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private KeyNames store;
+    private RememberedPasswords remembered;
+    private AppSettings settings;
     private List<String> names;
     private ArrayAdapter<String> adapter;
 
@@ -56,12 +77,14 @@ public class KeysActivity extends AppCompatActivity {
         setSupportActionBar(toolbar);
 
         store = new KeyNames(this);
+        remembered = RememberedPasswords.open(this);
+        settings = new AppSettings(this);
         names = store.load();
-        adapter = new ArrayAdapter<>(this, R.layout.key_item, R.id.key_name, names);
+        adapter = new KeyAdapter();
         ListView list = findViewById(R.id.keys);
         list.setAdapter(adapter);
         list.setEmptyView(findViewById(R.id.empty));
-        list.setOnItemClickListener((parent, view, position, id) -> askPassword(names.get(position)));
+        list.setOnItemClickListener((parent, view, position, id) -> openKey(names.get(position)));
         list.setOnItemLongClickListener((parent, view, position, id) -> {
             showKeyActions(position);
             return true;
@@ -76,6 +99,50 @@ public class KeysActivity extends AppCompatActivity {
         super.onDestroy();
     }
 
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.keys, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onPrepareOptionsMenu(Menu menu) {
+        // Autofill exists since API 26; before that there is nothing to allow.
+        menu.findItem(R.id.allow_password_managers)
+                .setVisible(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                .setChecked(settings.allowPasswordManagers());
+        menu.findItem(R.id.forget_all).setVisible(!remembered.names().isEmpty());
+        return super.onPrepareOptionsMenu(menu);
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == R.id.allow_password_managers) {
+            settings.setAllowPasswordManagers(!settings.allowPasswordManagers());
+            return true;
+        }
+        if (item.getItemId() == R.id.forget_all) {
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.forget_all)
+                    .setMessage(R.string.forget_all_confirm)
+                    .setNegativeButton(R.string.cancel, null)
+                    .setPositiveButton(R.string.forget, (d, w) -> forgetAll())
+                    .show();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
+    private void forgetAll() {
+        try {
+            remembered.forgetAll();
+        } catch (GeneralSecurityException e) {
+            // The entries are gone already; only deleting the unusable Keystore key failed.
+            Toast.makeText(this, e.toString(), Toast.LENGTH_LONG).show();
+        }
+        adapter.notifyDataSetChanged();
+    }
+
     private void persist() {
         store.save(names);
         adapter.notifyDataSetChanged();
@@ -83,14 +150,21 @@ public class KeysActivity extends AppCompatActivity {
 
     private void showKeyActions(int position) {
         String name = names.get(position);
+        List<CharSequence> items = new ArrayList<>(Arrays.asList(getString(R.string.rename), getString(R.string.delete)));
+        if (remembered.has(name))
+            items.add(getString(R.string.forget_password));
         new MaterialAlertDialogBuilder(this)
                 .setTitle(name)
-                .setItems(new CharSequence[]{getString(R.string.rename), getString(R.string.delete)},
+                .setItems(items.toArray(new CharSequence[0]),
                         (d, which) -> {
                             if (which == 0)
                                 askName(position);
-                            else
+                            else if (which == 1)
                                 confirmDelete(position);
+                            else {
+                                remembered.forget(name);
+                                adapter.notifyDataSetChanged();
+                            }
                         })
                 .show();
     }
@@ -101,7 +175,7 @@ public class KeysActivity extends AppCompatActivity {
                 .setMessage(getString(R.string.key_delete_confirm, names.get(position)))
                 .setNegativeButton(R.string.cancel, null)
                 .setPositiveButton(R.string.delete, (d, w) -> {
-                    names.remove(position);
+                    remembered.forget(names.remove(position));
                     persist();
                 })
                 .show();
@@ -131,10 +205,14 @@ public class KeysActivity extends AppCompatActivity {
             } else if (existing >= 0 && existing != position) {
                 layout.setError(getString(R.string.key_name_exists));
             } else {
-                if (position < 0)
+                if (position < 0) {
                     names.add(name);
-                else
-                    names.set(position, name);
+                } else {
+                    String oldName = names.set(position, name);
+                    // The password belongs to the name it was typed for; a new name is a new salt.
+                    if (!oldName.equals(name))
+                        remembered.rename(oldName, name);
+                }
                 persist();
                 dialog.dismiss();
             }
@@ -148,11 +226,69 @@ public class KeysActivity extends AppCompatActivity {
         showWithKeyboard(dialog, input);
     }
 
-    private void askPassword(String name) {
+    /** Unlocks the remembered password if there is one, otherwise asks for it. */
+    private void openKey(String name) {
+        if (remembered.has(name))
+            unlockRemembered(name);
+        else
+            askPassword(name, null);
+    }
+
+    private void unlockRemembered(String name) {
+        Cipher cipher;
+        try {
+            cipher = remembered.cipherForReading(name);
+        } catch (KeyInvalidatedException e) {
+            adapter.notifyDataSetChanged();
+            askPassword(name, getString(R.string.remembered_invalidated));
+            return;
+        } catch (GeneralSecurityException e) {
+            remembered.forget(name);
+            adapter.notifyDataSetChanged();
+            askPassword(name, getString(R.string.remembered_unreadable));
+            return;
+        }
+        // E.g. the sensor is temporarily unavailable; the password stays remembered.
+        if (!Biometrics.available(this)) {
+            askPassword(name, null);
+            return;
+        }
+        authenticate(cipher, getString(R.string.unlock_prompt_title, name), R.string.prompt_type_password,
+                new BiometricPrompt.AuthenticationCallback() {
+            @Override
+            public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                byte[] password;
+                try {
+                    password = remembered.read(name, authenticatedCipher(result));
+                } catch (GeneralSecurityException e) {
+                    remembered.forget(name);
+                    adapter.notifyDataSetChanged();
+                    askPassword(name, getString(R.string.remembered_unreadable));
+                    return;
+                }
+                showResult(name, password);
+            }
+
+            @Override
+            public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
+                // Cancelled, "Type the password", lockout, ...: typing the password always works.
+                if (!isFinishing())
+                    askPassword(name, null);
+            }
+        });
+    }
+
+    /** Asks for the password of key {@code name}; {@code notice} is shown below the field. */
+    private void askPassword(String name, @Nullable String notice) {
         View view = LayoutInflater.from(this).inflate(R.layout.dialog_text_input, null);
         TextInputLayout layout = view.findViewById(R.id.input_layout);
         TextInputEditText input = view.findViewById(R.id.input);
+        CheckBox remember = view.findViewById(R.id.remember);
         layout.setHint(getString(R.string.password_hint));
+        if (notice != null)
+            layout.setHelperText(notice);
+        if (Biometrics.available(this))
+            remember.setVisibility(View.VISIBLE);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
                 | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         // After setInputType, which installs the platform transformation that briefly shows the
@@ -161,8 +297,13 @@ public class KeysActivity extends AppCompatActivity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             // The keyboard must not learn the password (the flag exists since API 26).
             input.setImeOptions(input.getImeOptions() | EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
-            // A password manager must not offer to save the master password.
-            view.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+            if (settings.allowPasswordManagers()) {
+                input.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_YES);
+                input.setAutofillHints(View.AUTOFILL_HINT_PASSWORD);
+            } else {
+                // Unless the user opted in, a password manager must not offer to save the master password.
+                view.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+            }
         }
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
@@ -173,10 +314,14 @@ public class KeysActivity extends AppCompatActivity {
                 .create();
         secure(dialog);
         Runnable submit = () -> {
-            String password = String.valueOf(input.getText());
-            input.setText("");
+            byte[] password = utf8(input.getText());
+            if (input.getText() != null)
+                input.getText().clear();
             dialog.dismiss();
-            showResult(name, password);
+            if (remember.isChecked())
+                rememberThenShow(name, password);
+            else
+                showResult(name, password);
         };
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
                 .setOnClickListener(v -> submit.run()));
@@ -187,7 +332,81 @@ public class KeysActivity extends AppCompatActivity {
         showWithKeyboard(dialog, input);
     }
 
-    private void showResult(String name, String password) {
+    /** Stores the password behind the biometric prompt; the code is shown either way. */
+    private void rememberThenShow(String name, byte[] password) {
+        Cipher cipher;
+        try {
+            cipher = remembered.cipherForSaving();
+        } catch (GeneralSecurityException e) {
+            notRemembered(e.toString());
+            showResult(name, password);
+            return;
+        }
+        authenticate(cipher, getString(R.string.remember_prompt_title, name), R.string.prompt_do_not_remember,
+                new BiometricPrompt.AuthenticationCallback() {
+            @Override
+            public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                try {
+                    remembered.save(name, authenticatedCipher(result), password.clone());
+                } catch (GeneralSecurityException e) {
+                    notRemembered(e.toString());
+                }
+                adapter.notifyDataSetChanged();
+                showResult(name, password);
+            }
+
+            @Override
+            public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
+                notRemembered(errString.toString());
+                if (!isFinishing())
+                    showResult(name, password);
+                else
+                    Arrays.fill(password, (byte) 0);
+            }
+        });
+    }
+
+    private void notRemembered(String reason) {
+        Toast.makeText(this, getString(R.string.not_remembered, reason), Toast.LENGTH_LONG).show();
+    }
+
+    /**
+     * Shows the system prompt; the cipher can only be used inside onAuthenticationSucceeded,
+     * because the Keystore key demands an authentication for every operation.
+     */
+    private void authenticate(Cipher cipher, String title, int negativeButton,
+                              BiometricPrompt.AuthenticationCallback callback) {
+        BiometricPrompt.PromptInfo info = new BiometricPrompt.PromptInfo.Builder()
+                .setTitle(title)
+                .setAllowedAuthenticators(Biometrics.AUTHENTICATORS)
+                .setNegativeButtonText(getString(negativeButton))
+                .build();
+        new BiometricPrompt(this, ContextCompat.getMainExecutor(this), callback)
+                .authenticate(info, new BiometricPrompt.CryptoObject(cipher));
+    }
+
+    private static Cipher authenticatedCipher(BiometricPrompt.AuthenticationResult result)
+            throws GeneralSecurityException {
+        BiometricPrompt.CryptoObject crypto = result.getCryptoObject();
+        if (crypto == null || crypto.getCipher() == null)
+            throw new GeneralSecurityException("the prompt returned no cipher");
+        return crypto.getCipher();
+    }
+
+    /** UTF-8 bytes of the typed text without an intermediate String, so the copy can be wiped. */
+    private static byte[] utf8(@Nullable Editable text) {
+        if (text == null)
+            return new byte[0];
+        ByteBuffer encoded = StandardCharsets.UTF_8.encode(CharBuffer.wrap(text));
+        byte[] out = new byte[encoded.remaining()];
+        encoded.get(out);
+        if (encoded.hasArray())
+            Arrays.fill(encoded.array(), (byte) 0);
+        return out;
+    }
+
+    /** Shows the code for {@code password} and overwrites the array once it is used. */
+    private void showResult(String name, byte[] password) {
         View view = LayoutInflater.from(this).inflate(R.layout.dialog_result, null);
         TextView result = view.findViewById(R.id.result);
         TextView resultFull = view.findViewById(R.id.result_full);
@@ -221,6 +440,8 @@ public class KeysActivity extends AppCompatActivity {
             } catch (InterruptedException e) {
                 // The dialog was closed; nobody is waiting for this result.
                 return;
+            } finally {
+                Arrays.fill(password, (byte) 0);
             }
             final String value = text;
             final String shown = value != null ? NumericPassword.sixDigits(value) : error;
@@ -302,5 +523,26 @@ public class KeysActivity extends AppCompatActivity {
             dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
         dialog.show();
         input.requestFocus();
+    }
+
+    /** Key rows; a lock at the end marks keys with a remembered password. */
+    private final class KeyAdapter extends ArrayAdapter<String> {
+        KeyAdapter() {
+            super(KeysActivity.this, R.layout.key_item, R.id.key_name, names);
+        }
+
+        @NonNull
+        @Override
+        public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
+            TextView row = (TextView) super.getView(position, convertView, parent);
+            String name = names.get(position);
+            boolean hasPassword = remembered.has(name);
+            row.setCompoundDrawablesRelativeWithIntrinsicBounds(
+                    AppCompatResources.getDrawable(KeysActivity.this, R.drawable.ic_key), null,
+                    hasPassword ? AppCompatResources.getDrawable(KeysActivity.this, R.drawable.ic_lock) : null,
+                    null);
+            row.setContentDescription(hasPassword ? getString(R.string.key_remembered_description, name) : null);
+            return row;
+        }
     }
 }

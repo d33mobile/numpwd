@@ -23,7 +23,13 @@ public final class NumericPassword {
 
     public static String derive(String keyName, String password)
             throws OpensslShaCrypt.InvalidInputException, InterruptedException {
-        byte[] pw = password.getBytes(StandardCharsets.UTF_8);
+        return derive(keyName, password.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** Like {@link #derive(String, String)}; {@code passwordUtf8} is left unchanged. */
+    public static String derive(String keyName, byte[] passwordUtf8)
+            throws OpensslShaCrypt.InvalidInputException, InterruptedException {
+        byte[] pw = passwordUtf8;
         if (pw.length > PROMPT_MAX_BYTES)
             throw new OpensslShaCrypt.InvalidInputException(
                     "password longer than " + PROMPT_MAX_BYTES + " bytes");

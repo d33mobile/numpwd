@@ -23,4 +23,18 @@
     <string name="cancel">Cancel</string>
     <string name="ok">OK</string>
     <string name="close">Close</string>
+    <string name="remember_password">Remember with fingerprint</string>
+    <string name="remember_prompt_title">Remember the password for \"%1$s\"</string>
+    <string name="unlock_prompt_title">Unlock the password for \"%1$s\"</string>
+    <string name="prompt_type_password">Type the password</string>
+    <string name="prompt_do_not_remember">Don\'t remember</string>
+    <string name="not_remembered">The password was not remembered: %1$s</string>
+    <string name="remembered_invalidated">Remembered passwords were removed because the fingerprints or the screen lock changed.</string>
+    <string name="remembered_unreadable">The remembered password could not be read and was removed.</string>
+    <string name="key_remembered_description">%1$s, password remembered</string>
+    <string name="forget_password">Forget password</string>
+    <string name="forget_all">Forget all remembered passwords</string>
+    <string name="forget_all_confirm">Forget the remembered passwords of all keys? The key names stay.</string>
+    <string name="forget">Forget</string>
+    <string name="allow_password_managers">Allow password managers</string>
 </resources>

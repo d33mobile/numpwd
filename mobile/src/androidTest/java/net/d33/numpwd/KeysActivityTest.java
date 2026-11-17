@@ -2,6 +2,7 @@ package net.d33.numpwd;
 
 import static androidx.test.espresso.Espresso.onData;
 import static androidx.test.espresso.Espresso.onView;
+import static androidx.test.espresso.Espresso.openActionBarOverflowOrOptionsMenu;
 import static androidx.test.espresso.action.ViewActions.click;
 import static androidx.test.espresso.action.ViewActions.longClick;
 import static androidx.test.espresso.action.ViewActions.pressBack;
@@ -14,14 +15,19 @@ import static androidx.test.espresso.matcher.ViewMatchers.withId;
 import static androidx.test.espresso.matcher.ViewMatchers.withText;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
 
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
 import android.text.InputType;
 import android.view.KeyEvent;
+import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -53,10 +59,10 @@ import java.util.Collections;
 @RunWith(AndroidJUnit4.class)
 public class KeysActivityTest {
     // openssl passwd -6 -salt test abc | tr -dc '[0-9]' | head -c6
-    private static final String TEST_CODE = "659550";
+    static final String TEST_CODE = "659550";
     // The whole tr output, 65955012972, shown below the code in groups of four.
     private static final String TEST_DIGITS = "65955012972";
-    private static final String TEST_DIGITS_GROUPED = "6595 5012 972";
+    static final String TEST_DIGITS_GROUPED = "6595 5012 972";
     // Generous because a loaded emulator can take several seconds per dialog transition;
     // without cancellation the second derivation would still wait for many minutes.
     private static final long RESULT_TIMEOUT_MS = 30_000;
@@ -65,9 +71,11 @@ public class KeysActivityTest {
     private ActivityScenario<KeysActivity> scenario;
 
     @Before
-    public void clearKeys() {
+    public void clearKeys() throws Exception {
         Context context = ApplicationProvider.getApplicationContext();
         new KeyNames(context).save(Collections.emptyList());
+        RememberedPasswords.open(context).forgetAll();
+        new AppSettings(context).setAllowPasswordManagers(false);
     }
 
     @After
@@ -77,11 +85,11 @@ public class KeysActivityTest {
     }
 
     /** A tap on a busy emulator can register as a long press; dismiss the key menu and retry. */
-    private static ViewAction tap() {
+    static ViewAction tap() {
         return click(pressBack());
     }
 
-    private void enterInDialog(String text) {
+    static void enterInDialog(String text) {
         onView(withId(R.id.input)).inRoot(isDialog()).perform(replaceText(text));
         onView(withId(android.R.id.button1)).inRoot(isDialog()).perform(click());
     }
@@ -154,6 +162,42 @@ public class KeysActivityTest {
     }
 
     @Test
+    public void passwordManagersAreOptIn() {
+        assumeTrue("autofill exists since API 26", Build.VERSION.SDK_INT >= Build.VERSION_CODES.O);
+        Context context = ApplicationProvider.getApplicationContext();
+        new KeyNames(context).save(Collections.singletonList("test"));
+        scenario = ActivityScenario.launch(KeysActivity.class);
+
+        assertPasswordAutofill(false);
+        toggleAllowPasswordManagers();
+        assertTrue(new AppSettings(context).allowPasswordManagers());
+        assertPasswordAutofill(true);
+        toggleAllowPasswordManagers();
+        assertFalse(new AppSettings(context).allowPasswordManagers());
+        assertPasswordAutofill(false);
+    }
+
+    private static void toggleAllowPasswordManagers() {
+        openActionBarOverflowOrOptionsMenu(ApplicationProvider.getApplicationContext());
+        onView(withText(R.string.allow_password_managers)).perform(click());
+    }
+
+    /** Opens the password dialog of key "test", checks the autofill flags and closes it. */
+    private static void assertPasswordAutofill(boolean allowed) {
+        onData(is("test")).inAdapterView(withId(R.id.keys)).perform(tap());
+        onView(withId(R.id.input_container)).inRoot(isDialog()).check((view, e) -> assertEquals(
+                allowed ? View.IMPORTANT_FOR_AUTOFILL_AUTO : View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS,
+                view.getImportantForAutofill()));
+        onView(withId(R.id.input)).inRoot(isDialog()).check((view, e) -> {
+            // isImportantForAutofill() takes the ancestors' exclusion into account.
+            assertEquals(allowed, view.isImportantForAutofill());
+            if (allowed)
+                assertTrue(Arrays.asList(view.getAutofillHints()).contains(View.AUTOFILL_HINT_PASSWORD));
+        });
+        onView(withId(android.R.id.button2)).inRoot(isDialog()).perform(click());
+    }
+
+    @Test
     public void renameAndDeleteKey() {
         new KeyNames(ApplicationProvider.getApplicationContext()).save(Arrays.asList("a", "b"));
         scenario = ActivityScenario.launch(KeysActivity.class);
@@ -185,7 +229,7 @@ public class KeysActivityTest {
         }
     }
 
-    private static String clipboardText() {
+    static String clipboardText() {
         String[] text = {null};
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             ClipboardManager cm = (ClipboardManager) ApplicationProvider.getApplicationContext()
@@ -202,7 +246,7 @@ public class KeysActivityTest {
     }
 
     /** Text of the result dialog, or null while that dialog is not on screen yet. */
-    private static String readResult() {
+    static String readResult() {
         String[] text = {null};
         try {
             onView(withId(R.id.result)).inRoot(isDialog())
@@ -217,7 +261,7 @@ public class KeysActivityTest {
     }
 
     /** The result dialog opens after the password dialog has gone, which can take a while. */
-    private static String readResultWhenShown() {
+    static String readResultWhenShown() {
         long deadline = SystemClock.uptimeMillis() + RESULT_TIMEOUT_MS;
         String text = readResult();
         while (text == null && SystemClock.uptimeMillis() < deadline) {
@@ -228,7 +272,7 @@ public class KeysActivityTest {
     }
 
     /** The digits are computed off the main thread, which Espresso does not wait for. */
-    private static String waitForResult() {
+    static String waitForResult() {
         long deadline = SystemClock.uptimeMillis() + RESULT_TIMEOUT_MS;
         String text = readResult();
         while ((text == null || computing().equals(text)) && SystemClock.uptimeMillis() < deadline) {

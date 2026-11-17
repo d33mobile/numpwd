@@ -89,6 +89,9 @@ public class OpensslVectorsTest {
                 }
             } else {
                 assertEquals("salt " + name, v.digits, NumericPassword.derive(name, password));
+                // A remembered password comes back from the Keystore as UTF-8 bytes.
+                assertEquals("salt " + name + " (bytes)", v.digits,
+                        NumericPassword.derive(name, password.getBytes(StandardCharsets.UTF_8)));
             }
         }
     }
