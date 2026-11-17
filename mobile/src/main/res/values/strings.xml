@@ -31,6 +31,7 @@
     <string name="not_remembered">The password was not remembered: %1$s</string>
     <string name="remembered_invalidated">Remembered passwords were removed because the fingerprints or the screen lock changed.</string>
     <string name="remembered_unreadable">The remembered password could not be read and was removed.</string>
+    <string name="remembered_unavailable">The remembered password could not be unlocked this time.</string>
     <string name="key_remembered_description">%1$s, password remembered</string>
     <string name="forget_password">Forget password</string>
     <string name="forget_all">Forget all remembered passwords</string>

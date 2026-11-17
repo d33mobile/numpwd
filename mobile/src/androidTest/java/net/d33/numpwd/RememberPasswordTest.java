@@ -24,6 +24,7 @@ import static org.junit.Assert.assertTrue;
 import android.content.Context;
 import android.os.SystemClock;
 import android.security.keystore.KeyInfo;
+import android.widget.ListView;
 
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.core.app.ApplicationProvider;
@@ -38,6 +39,7 @@ import org.junit.runner.RunWith;
 
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
+import java.util.Arrays;
 import java.util.Collections;
 
 import javax.crypto.Cipher;
@@ -52,6 +54,8 @@ import javax.crypto.SecretKeyFactory;
 public class RememberPasswordTest {
     // How long a rejected fingerprint must keep the code hidden.
     private static final long NOT_REVEALED_MS = 3_000;
+    private static final int IV_BYTES = 12;
+    private static final int TAG_BYTES = 16;
 
     private ActivityScenario<KeysActivity> scenario;
 
@@ -85,15 +89,21 @@ public class RememberPasswordTest {
 
     /** Types the password with "Remember" ticked and confirms with the enrolled finger. */
     private void rememberTestAbc() throws Exception {
-        onData(is("test")).inAdapterView(withId(R.id.keys)).perform(KeysActivityTest.tap());
-        onView(withId(R.id.remember)).inRoot(isDialog()).check(matches(isNotChecked())).perform(click());
-        KeysActivityTest.enterInDialog("abc");
-        assertNotNull("no prompt to remember the password",
-                EmulatorBiometrics.waitForText(string(R.string.remember_prompt_title, "test")));
-        EmulatorBiometrics.touch(EmulatorBiometrics.ENROLLED_FINGER);
+        remember("test", "abc");
         assertEquals(KeysActivityTest.TEST_CODE, KeysActivityTest.waitForResult());
         onView(withId(android.R.id.button2)).inRoot(isDialog()).perform(click());
-        assertTrue(remembered().has("test"));
+    }
+
+    /** Remembers {@code password} for key {@code name}, leaving its result dialog open. */
+    private void remember(String name, String password) throws Exception {
+        onData(is(name)).inAdapterView(withId(R.id.keys)).perform(KeysActivityTest.tap());
+        onView(withId(R.id.remember)).inRoot(isDialog()).check(matches(isNotChecked())).perform(click());
+        KeysActivityTest.enterInDialog(password);
+        assertNotNull("no prompt to remember the password",
+                EmulatorBiometrics.waitForText(string(R.string.remember_prompt_title, name)));
+        EmulatorBiometrics.touch(EmulatorBiometrics.ENROLLED_FINGER);
+        assertNotNull(KeysActivityTest.waitForResult());
+        assertTrue(remembered().has(name));
     }
 
     /** Taps the key and waits for the system prompt that unlocks its remembered password. */
@@ -114,6 +124,12 @@ public class RememberPasswordTest {
         assertEquals(KeysActivityTest.TEST_CODE, KeysActivityTest.waitForResult());
         onView(withId(R.id.result_full)).inRoot(isDialog())
                 .check(matches(withText(KeysActivityTest.TEST_DIGITS_GROUPED)));
+        // Padded and bound to the key name by the Keystore cipher: "02:" iv ":" ciphertext + tag.
+        String stored = context().getSharedPreferences(RememberedPasswords.PREFS, Context.MODE_PRIVATE)
+                .getString("test", "");
+        assertTrue(stored, stored.startsWith("02:"));
+        assertEquals("02:".length() + 2 * IV_BYTES + 1 + 2 * (RememberedPasswords.PADDED_BYTES + TAG_BYTES),
+                stored.length());
     }
 
     @Test
@@ -171,6 +187,45 @@ public class RememberPasswordTest {
         onData(is("test")).inAdapterView(withId(R.id.keys)).perform(KeysActivityTest.tap());
         KeysActivityTest.enterInDialog("abc");
         assertEquals(KeysActivityTest.TEST_CODE, KeysActivityTest.waitForResult());
+    }
+
+    /**
+     * Two taps before the system prompt appears. The prompt authenticates the first key's
+     * cipher, so only the first tap may count; the second key keeps its password.
+     */
+    @Test
+    public void secondTapWhileThePromptIsPendingIsIgnored() throws Exception {
+        scenario.close();
+        new KeyNames(context()).save(Arrays.asList("test", "other"));
+        scenario = ActivityScenario.launch(KeysActivity.class);
+        rememberTestAbc();
+        remember("other", "xyz");
+        onView(withId(android.R.id.button2)).inRoot(isDialog()).perform(click());
+
+        scenario.onActivity(activity -> {
+            ListView list = activity.findViewById(R.id.keys);
+            list.performItemClick(list.getChildAt(0), 0, 0);
+            list.performItemClick(list.getChildAt(1), 1, 1);
+        });
+        assertNotNull("no unlock prompt for the first key",
+                EmulatorBiometrics.waitForText(string(R.string.unlock_prompt_title, "test")));
+        EmulatorBiometrics.touch(EmulatorBiometrics.ENROLLED_FINGER);
+        assertEquals(KeysActivityTest.TEST_CODE, KeysActivityTest.waitForResult());
+        assertTrue("the second key lost its password", remembered().has("other"));
+    }
+
+    /** A prompt that already finished must not be cancelled again when the activity goes. */
+    @Test
+    public void recreationAfterAFinishedPromptCancelsNothing() throws Exception {
+        rememberTestAbc();
+        tapAndWaitForUnlockPrompt();
+        EmulatorBiometrics.touch(EmulatorBiometrics.ENROLLED_FINGER);
+        assertEquals(KeysActivityTest.TEST_CODE, KeysActivityTest.waitForResult());
+
+        EmulatorBiometrics.shell("logcat -c");
+        scenario.recreate();
+        String log = EmulatorBiometrics.shell("logcat -d -s BiometricPromptCompat");
+        assertFalse(log, log.contains("Unable to cancel authentication"));
     }
 
     @Test

@@ -25,6 +25,8 @@ import android.content.Context;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
 import android.text.InputType;
 import android.view.KeyEvent;
 import android.view.View;
@@ -52,6 +54,8 @@ import java.io.InputStream;
 import java.util.Arrays;
 import java.util.Collections;
 
+import javax.crypto.KeyGenerator;
+
 /**
  * UI smoke test: add a key, enter a password, read and copy the code and the full digits;
  * rename and delete a key.
@@ -67,6 +71,7 @@ public class KeysActivityTest {
     // without cancellation the second derivation would still wait for many minutes.
     private static final long RESULT_TIMEOUT_MS = 30_000;
     private static final char PASSWORD_DOT = '\u2022';
+    private static final long CLIPBOARD_CLEAR_SLACK_MS = 3_000;
 
     private ActivityScenario<KeysActivity> scenario;
 
@@ -114,6 +119,23 @@ public class KeysActivityTest {
 
         assertEquals(Collections.singletonList("test"),
                 new KeyNames(ApplicationProvider.getApplicationContext()).load());
+    }
+
+    /** On Android < 12 "back" destroys the activity; a rotation does on every version. */
+    @Test
+    public void clipboardIsClearedAfterTheActivityIsGone() {
+        new KeyNames(ApplicationProvider.getApplicationContext()).save(Collections.singletonList("test"));
+        scenario = ActivityScenario.launch(KeysActivity.class);
+        onData(is("test")).inAdapterView(withId(R.id.keys)).perform(tap());
+        enterInDialog("abc");
+        assertEquals(TEST_CODE, waitForResult());
+        onView(withId(android.R.id.button1)).inRoot(isDialog()).perform(click());
+        assertEquals(TEST_CODE, clipboardText());
+
+        scenario.recreate();
+        SystemClock.sleep(KeysActivity.CLIPBOARD_CLEAR_MS + CLIPBOARD_CLEAR_SLACK_MS);
+        String left = clipboardText();
+        assertTrue("the code stayed on the clipboard: " + left, left == null || left.isEmpty());
     }
 
     @Test
@@ -215,6 +237,58 @@ public class KeysActivityTest {
         onView(withText("b")).check(doesNotExist());
         assertEquals(Collections.singletonList("c"),
                 new KeyNames(ApplicationProvider.getApplicationContext()).load());
+    }
+
+    /** Stores {@code value} as the remembered password of key "test", bypassing the encryption. */
+    private static void storeRememberedValue(String value) {
+        ApplicationProvider.getApplicationContext()
+                .getSharedPreferences(RememberedPasswords.PREFS, Context.MODE_PRIVATE)
+                .edit().putString("test", value).commit();
+    }
+
+    /** Taps key "test" and checks the notice below the password field that opens. */
+    private static void tapTestAndExpectNotice(int notice) {
+        onData(is("test")).inAdapterView(withId(R.id.keys)).perform(tap());
+        onView(withId(R.id.input_layout)).inRoot(isDialog()).check((view, e) -> assertEquals(
+                ApplicationProvider.getApplicationContext().getString(notice),
+                String.valueOf(((TextInputLayout) view).getHelperText())));
+    }
+
+    @Test
+    public void corruptRememberedPasswordIsForgotten() {
+        Context context = ApplicationProvider.getApplicationContext();
+        new KeyNames(context).save(Collections.singletonList("test"));
+        storeRememberedValue("not hex");
+        scenario = ActivityScenario.launch(KeysActivity.class);
+
+        tapTestAndExpectNotice(R.string.remembered_unreadable);
+        assertFalse(RememberedPasswords.open(context).has("test"));
+        enterInDialog("abc");
+        assertEquals(TEST_CODE, waitForResult());
+    }
+
+    /**
+     * A Keystore key that cannot decrypt makes Cipher.init fail for a reason that says nothing
+     * about the stored value, like a transient Keystore error; the password stays remembered.
+     */
+    @Test
+    public void keystoreFailureKeepsTheRememberedPassword() throws Exception {
+        Context context = ApplicationProvider.getApplicationContext();
+        new KeyNames(context).save(Collections.singletonList("test"));
+        KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+        generator.init(new KeyGenParameterSpec.Builder(KeystorePasswordKey.ALIAS, KeyProperties.PURPOSE_ENCRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .build());
+        generator.generateKey();
+        // A well-formed entry: a 12 byte IV and a 16 byte ciphertext (tag only).
+        storeRememberedValue("000000000000000000000000:00000000000000000000000000000000");
+        scenario = ActivityScenario.launch(KeysActivity.class);
+
+        tapTestAndExpectNotice(R.string.remembered_unavailable);
+        assertTrue(RememberedPasswords.open(context).has("test"));
+        enterInDialog("abc");
+        assertEquals(TEST_CODE, waitForResult());
     }
 
     /** Runs a shell command and waits for it by reading its output to the end. */

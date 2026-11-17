@@ -57,17 +57,19 @@ import javax.crypto.Cipher;
  */
 public class KeysActivity extends AppCompatActivity {
     private static final int RESULT_VISIBLE_MS = 60_000;
-    private static final int CLIPBOARD_CLEAR_MS = 30_000;
+    static final int CLIPBOARD_CLEAR_MS = 30_000;
     private static final int DIGIT_GROUP = 4;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+    // Clears the clipboard; unlike the activity's handler it is not emptied when the activity goes.
+    private static final Handler CLIPBOARD_CLEARER = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private KeyNames store;
     private RememberedPasswords remembered;
     private AppSettings settings;
     private List<String> names;
     private ArrayAdapter<String> adapter;
-    // The system prompt on screen, if any, and the typed password waiting for its outcome.
+    // The system prompt on screen or about to appear, and the typed password waiting for its outcome.
     @Nullable
     private BiometricPrompt prompt;
     @Nullable
@@ -99,7 +101,8 @@ public class KeysActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        // The system prompt would outlive a rotation and report to this destroyed activity.
+        // The system prompt would outlive a rotation and report to this destroyed activity. The
+        // callbacks clear the field once the prompt is gone.
         if (prompt != null)
             prompt.cancelAuthentication();
         wipePasswordAwaitingPrompt();
@@ -237,6 +240,10 @@ public class KeysActivity extends AppCompatActivity {
 
     /** Unlocks the remembered password if there is one, otherwise asks for it. */
     private void openKey(String name) {
+        // A second tap before the system prompt shows up would take over the callback of the
+        // prompt, which still authenticates the first key's cipher.
+        if (prompt != null)
+            return;
         if (remembered.has(name))
             unlockRemembered(name);
         else
@@ -247,14 +254,8 @@ public class KeysActivity extends AppCompatActivity {
         Cipher cipher;
         try {
             cipher = remembered.cipherForReading(name);
-        } catch (KeyInvalidatedException e) {
-            adapter.notifyDataSetChanged();
-            askPassword(name, getString(R.string.remembered_invalidated));
-            return;
         } catch (GeneralSecurityException e) {
-            remembered.forget(name);
-            adapter.notifyDataSetChanged();
-            askPassword(name, getString(R.string.remembered_unreadable));
+            notReadable(name, e);
             return;
         }
         // E.g. the sensor is temporarily unavailable; the password stays remembered.
@@ -266,15 +267,14 @@ public class KeysActivity extends AppCompatActivity {
                 new BiometricPrompt.AuthenticationCallback() {
             @Override
             public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                prompt = null;
                 if (isGone())
                     return;
                 byte[] password;
                 try {
                     password = remembered.read(name, authenticatedCipher(result));
                 } catch (GeneralSecurityException e) {
-                    remembered.forget(name);
-                    adapter.notifyDataSetChanged();
-                    askPassword(name, getString(R.string.remembered_unreadable));
+                    notReadable(name, e);
                     return;
                 }
                 showResult(name, password);
@@ -282,11 +282,28 @@ public class KeysActivity extends AppCompatActivity {
 
             @Override
             public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
+                prompt = null;
                 // Cancelled, "Type the password", lockout, ...: typing the password always works.
                 if (!isGone())
                     askPassword(name, null);
             }
         });
+    }
+
+    /**
+     * Falls back to typing the password. Only an invalidated key or a damaged entry loses the
+     * remembered password; any other failure may not happen next time.
+     */
+    private void notReadable(String name, GeneralSecurityException e) {
+        int notice;
+        if (e instanceof KeyInvalidatedException)
+            notice = R.string.remembered_invalidated;
+        else if (e instanceof CorruptEntryException)
+            notice = R.string.remembered_unreadable;
+        else
+            notice = R.string.remembered_unavailable;
+        adapter.notifyDataSetChanged();
+        askPassword(name, getString(notice));
     }
 
     /** Asks for the password of key {@code name}; {@code notice} is shown below the field. */
@@ -358,6 +375,7 @@ public class KeysActivity extends AppCompatActivity {
                 new BiometricPrompt.AuthenticationCallback() {
             @Override
             public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                prompt = null;
                 if (isGone()) {
                     Arrays.fill(password, (byte) 0);
                     return;
@@ -374,6 +392,7 @@ public class KeysActivity extends AppCompatActivity {
 
             @Override
             public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
+                prompt = null;
                 if (isGone()) {
                     Arrays.fill(password, (byte) 0);
                     return;
@@ -514,7 +533,7 @@ public class KeysActivity extends AppCompatActivity {
     }
 
     private void copyToClipboard(String value) {
-        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        ClipboardManager cm = (ClipboardManager) getApplicationContext().getSystemService(Context.CLIPBOARD_SERVICE);
         ClipData clip = ClipData.newPlainText(getString(R.string.app_name), value);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             PersistableBundle extras = new PersistableBundle();
@@ -524,7 +543,10 @@ public class KeysActivity extends AppCompatActivity {
         }
         cm.setPrimaryClip(clip);
         Toast.makeText(this, getString(R.string.copied, CLIPBOARD_CLEAR_MS / 1000), Toast.LENGTH_SHORT).show();
-        handler.postDelayed(() -> clearClipboardIfOurs(cm, value), CLIPBOARD_CLEAR_MS);
+        // The clipboard holds one value, so only the latest copy's timer counts; an earlier one
+        // for the same code would clear this copy too early.
+        CLIPBOARD_CLEARER.removeCallbacksAndMessages(null);
+        CLIPBOARD_CLEARER.postDelayed(() -> clearClipboardIfOurs(cm, value), CLIPBOARD_CLEAR_MS);
     }
 
     private static void clearClipboardIfOurs(ClipboardManager cm, String value) {

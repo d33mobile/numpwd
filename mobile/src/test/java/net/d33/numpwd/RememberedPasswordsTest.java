@@ -12,6 +12,7 @@ import org.junit.Test;
 import java.nio.charset.StandardCharsets;
 import java.security.AlgorithmParameters;
 import java.security.GeneralSecurityException;
+import java.security.InvalidKeyException;
 import java.security.Key;
 import java.security.ProviderException;
 import java.security.SecureRandom;
@@ -45,6 +46,9 @@ public class RememberedPasswordsTest {
         SecretKey key;
         boolean invalidated;
         boolean providerFails;
+        // A Cipher.init failure that says nothing about the stored value, e.g. the Keystore's
+        // UserNotAuthenticatedException or a transient error of the secure hardware.
+        boolean initFails;
         int deletions;
 
         private SecretKey key() throws GeneralSecurityException {
@@ -70,6 +74,8 @@ public class RememberedPasswordsTest {
 
         @Override
         public Cipher decryptCipher(byte[] iv) throws GeneralSecurityException {
+            if (initFails)
+                throw new InvalidKeyException("user not authenticated");
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
             cipher.init(Cipher.DECRYPT_MODE, key(), new GCMParameterSpec(TAG_BITS, iv));
             return cipher;
@@ -166,13 +172,18 @@ public class RememberedPasswordsTest {
     }
 
     @Test
-    public void tamperedCiphertextIsRejected() throws Exception {
+    public void tamperedCiphertextIsRejectedAndForgotten() throws Exception {
         remember("test", "abc");
+        remember("other", "xyz");
         String stored = store.map.get("test");
         char last = stored.charAt(stored.length() - 1);
         store.map.put("test", stored.substring(0, stored.length() - 1) + (last == '0' ? '1' : '0'));
 
-        assertThrows(AEADBadTagException.class, () -> recall("test"));
+        CorruptEntryException e = assertThrows(CorruptEntryException.class, () -> recall("test"));
+        assertTrue(e.getCause() instanceof AEADBadTagException);
+        assertFalse(remembered.has("test"));
+        assertArrayEquals(utf8("xyz"), recall("other"));
+        assertEquals(0, key.deletions);
     }
 
     @Test
@@ -187,12 +198,13 @@ public class RememberedPasswordsTest {
     }
 
     @Test
-    public void renameMovesThePassword() throws Exception {
+    public void renameForgetsThePassword() throws Exception {
+        // The entry is bound to its key name; moving it would need another fingerprint.
         remember("old", "abc");
+        remember("other", "xyz");
         remembered.rename("old", "new");
 
-        assertEquals(Collections.singleton("new"), remembered.names());
-        assertArrayEquals(utf8("abc"), recall("new"));
+        assertEquals(Collections.singleton("other"), remembered.names());
     }
 
     @Test
@@ -200,6 +212,65 @@ public class RememberedPasswordsTest {
         remember("new", "stale");
         remembered.rename("old", "new");
         assertTrue(remembered.names().isEmpty());
+    }
+
+    private static byte[] bytesOfLength(int length) {
+        byte[] b = new byte[length];
+        Arrays.fill(b, (byte) 'p');
+        return b;
+    }
+
+    @Test
+    public void storedValueDoesNotRevealThePasswordLength() throws Exception {
+        remember("empty", "");
+        remember("short", "x");
+        remembered.save("longest", remembered.cipherForSaving(), bytesOfLength(NumericPassword.PROMPT_MAX_BYTES));
+
+        int length = store.map.get("empty").length();
+        assertEquals(length, store.map.get("short").length());
+        assertEquals(length, store.map.get("longest").length());
+        assertArrayEquals(new byte[0], recall("empty"));
+        assertArrayEquals(utf8("x"), recall("short"));
+        assertArrayEquals(bytesOfLength(NumericPassword.PROMPT_MAX_BYTES), recall("longest"));
+    }
+
+    @Test
+    public void newEntriesStartWithTheFormatVersion() throws Exception {
+        remember("test", "abc");
+        assertTrue(store.map.get("test").startsWith("02:"));
+    }
+
+    @Test
+    public void passwordTooLongToDeriveIsNotStored() throws Exception {
+        byte[] password = bytesOfLength(NumericPassword.PROMPT_MAX_BYTES + 1);
+        assertThrows(GeneralSecurityException.class,
+                () -> remembered.save("test", remembered.cipherForSaving(), password));
+        assertFalse(remembered.has("test"));
+        assertArrayEquals(new byte[password.length], password);
+    }
+
+    @Test
+    public void entriesSwappedOnDiskAreRejected() throws Exception {
+        remember("a", "1");
+        remember("b", "2");
+        String a = store.map.get("a");
+        store.map.put("a", store.map.get("b"));
+        store.map.put("b", a);
+
+        CorruptEntryException e = assertThrows(CorruptEntryException.class, () -> recall("a"));
+        assertTrue(e.getCause() instanceof AEADBadTagException);
+        assertFalse(remembered.has("a"));
+    }
+
+    /** Version 1.5 stored "hex(iv):hex(ciphertext)" of the bare password, without associated data. */
+    @Test
+    public void entryFromVersion15IsStillRead() throws Exception {
+        Cipher cipher = key.encryptCipher();
+        byte[] ciphertext = cipher.doFinal(utf8("abc"));
+        store.map.put("test", Hex.encode(cipher.getIV()) + ":" + Hex.encode(ciphertext));
+
+        assertArrayEquals(utf8("abc"), recall("test"));
+        assertTrue(remembered.has("test"));
     }
 
     @Test
@@ -240,9 +311,28 @@ public class RememberedPasswordsTest {
     }
 
     @Test
-    public void corruptEntryIsReportedNotDecrypted() {
-        store.map.put("test", "not hex");
-        assertThrows(GeneralSecurityException.class, () -> remembered.cipherForReading("test"));
+    public void corruptEntryIsReportedAndForgotten() {
+        for (String corrupt : Arrays.asList("not hex", "zz:00", "00", "", "0011:0011")) {
+            store.map.put("test", corrupt);
+            assertThrows(corrupt, CorruptEntryException.class, () -> remembered.cipherForReading("test"));
+            assertFalse(corrupt, remembered.has("test"));
+        }
+        assertEquals(0, key.deletions);
+    }
+
+    @Test
+    public void failureToPrepareTheCipherKeepsTheEntry() throws Exception {
+        remember("test", "abc");
+        key.initFails = true;
+
+        GeneralSecurityException e = assertThrows(GeneralSecurityException.class,
+                () -> remembered.cipherForReading("test"));
+        assertFalse(e instanceof CorruptEntryException);
+        assertFalse(e instanceof KeyInvalidatedException);
+        assertTrue(remembered.has("test"));
+
+        key.initFails = false;
+        assertArrayEquals(utf8("abc"), recall("test"));
     }
 
     @Test
@@ -253,6 +343,7 @@ public class RememberedPasswordsTest {
         GeneralSecurityException reading = assertThrows(GeneralSecurityException.class,
                 () -> remembered.cipherForReading("a"));
         assertFalse(reading instanceof KeyInvalidatedException);
+        assertFalse(reading instanceof CorruptEntryException);
         assertThrows(GeneralSecurityException.class, remembered::cipherForSaving);
         // Nothing says the key is lost, so the entry stays.
         assertTrue(remembered.has("a"));
@@ -314,6 +405,11 @@ public class RememberedPasswordsTest {
             return 0;
         }
 
+        // Like GCM, which takes the key name as associated data.
+        @Override
+        protected void engineUpdateAAD(byte[] src, int offset, int len) {
+        }
+
         @Override
         protected byte[] engineDoFinal(byte[] input, int inputOffset, int inputLen) {
             throw new ProviderException("keystore operation failed");
@@ -342,6 +438,10 @@ public class RememberedPasswordsTest {
         assertThrows(GeneralSecurityException.class, () -> remembered.save("b", failing, password));
         assertArrayEquals("the plaintext must be wiped after a failed save too", new byte[3], password);
         assertFalse(remembered.has("b"));
-        assertThrows(GeneralSecurityException.class, () -> remembered.read("a", failing));
+        GeneralSecurityException reading = assertThrows(GeneralSecurityException.class,
+                () -> remembered.read("a", failing));
+        assertFalse("a hardware failure says nothing about the stored value",
+                reading instanceof CorruptEntryException);
+        assertTrue(remembered.has("a"));
     }
 }
