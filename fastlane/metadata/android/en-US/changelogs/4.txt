@@ -1,0 +1,2 @@
+* The result is now a six-character code: openssl passwd -6 -salt KEY | tr -dc '[0-9]' | head -c6. The whole digit string stays below it; "Copy all" copies it.
+* The password field never shows a typed character, not even briefly with the system "Show passwords" setting on. The show/hide toggle is gone.
