@@ -1,0 +1,3 @@
+* Optionally remember a key's password behind the fingerprint (Android Keystore, AES-256-GCM, a new fingerprint authentication for every use). Enrolling a fingerprint or removing the screen lock forgets all remembered passwords.
+* Forget a password from the key's long-press menu, or all of them from the menu.
+* New menu setting "Allow password managers" (off by default) lets autofill services fill the password field.

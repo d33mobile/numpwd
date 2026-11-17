@@ -25,8 +25,9 @@ password on a computer without the app.
 
 ## Features
 
-- Only key names are stored. The password is never saved or logged and is
-  excluded from autofill and keyboard learning.
+- Only key names are stored, unless you choose to remember a password (see
+  below). The password is never logged and is excluded from keyboard
+  learning, and from autofill unless you allow password managers.
 - The password field shows a dot for every character from the first moment,
   also when the system "Show passwords" setting would briefly show the last
   typed character. There is no show/hide toggle.
@@ -35,8 +36,37 @@ password on a computer without the app.
 - Copy buttons for the code and the whole string. The clipboard is cleared
   after 30 seconds if it still holds the copied value, and the result closes
   after a minute.
-- No permissions and no network access. Android backup includes only the key
-  name list.
+- No network access. Android backup includes only the key name list.
+
+## Remembering a password
+
+If the phone has a fingerprint enrolled, the password dialog offers
+**Remember with fingerprint**. With it ticked, the system prompt asks for the
+fingerprint once more and numpwd stores the password encrypted for that key.
+The next tap on the key shows the fingerprint prompt instead of the password
+field; **Type the password** in the prompt, or cancelling it, falls back to
+typing. A lock icon in the list marks such keys.
+
+- The password is encrypted with AES-256-GCM by a key in the Android Keystore
+  (StrongBox when the phone has one). The key can only be used right after a
+  fingerprint authentication for that single operation, so the stored
+  ciphertext is useless without the finger, also to someone who copies the
+  app's files.
+- The screen lock PIN or pattern cannot unlock a remembered password. If it
+  could, the key would survive a new fingerprint enrolment, and anyone who
+  learned the PIN could read every remembered password.
+- Enrolling a new fingerprint or removing the screen lock invalidates the key.
+  numpwd then forgets all remembered passwords, says so, and asks for the
+  password again.
+- Long-press a key for **Forget password**; the menu has **Forget all
+  remembered passwords**. Remembered passwords are not included in Android
+  backup.
+
+## Password managers
+
+The menu item **Allow password managers** (off by default) lets the system
+autofill service fill the password field and offer to save what you type.
+Leave it off unless your password manager is where the password should live.
 
 ## Compatibility notes
 
@@ -86,6 +116,17 @@ Release builds are signed when `NUMPWD_KEYSTORE`, `NUMPWD_KEYSTORE_PASS`,
 ./gradlew :mobile:connectedDebugAndroidTest  # UI test on a device or emulator
 scripts/ci-vector-check.sh 1234              # regenerate vectors with the local openssl
 ```
+
+The fingerprint tests (`RememberPasswordTest`) run only on an emulator. They
+set the PIN 1111, enrol a fingerprint through Settings and touch the sensor via
+the emulator console, which needs the console token:
+
+```sh
+./gradlew :mobile:connectedDebugAndroidTest \
+    -Pandroid.testInstrumentationRunnerArguments.emulatorConsoleToken="$(cat ~/.emulator_console_auth_token)"
+```
+
+Without the token they are skipped.
 
 CI (`.github/workflows/build.yml`) runs all three plus Android lint.
 
