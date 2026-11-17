@@ -93,9 +93,11 @@ final class EmulatorBiometrics {
     /** Enrols a finger through the Settings app, as a user would. */
     static void enroll(int finger) throws IOException {
         UiDevice device = device();
-        shell("am start -a android.settings.FINGERPRINT_ENROLL");
+        // -S: a fresh Settings process; on API 36 a Settings task left over from an earlier
+        // enrolment sometimes came back without the PIN screen.
+        shell("am start -S -W -a android.settings.FINGERPRINT_ENROLL");
         UiObject2 pin = device.wait(Until.findObject(By.res(SETTINGS, "password_entry")), UI_TIMEOUT_MS);
-        assertNotNull("Settings did not ask for the PIN", pin);
+        assertNotNull("Settings did not ask for the PIN; screen: " + screenTexts(), pin);
         pin.setText(PIN);
         device.pressEnter();
 
@@ -118,6 +120,14 @@ final class EmulatorBiometrics {
                 touch(finger);
         }
         throw new AssertionError("fingerprint enrolment did not finish");
+    }
+
+    /** The texts on screen, for failure messages. */
+    private static String screenTexts() {
+        StringBuilder sb = new StringBuilder();
+        for (UiObject2 o : device().findObjects(By.text(Pattern.compile(".+"))))
+            sb.append('[').append(o.getText()).append(']');
+        return sb.toString();
     }
 
     /** Puts finger {@code finger} on the emulator's sensor. */

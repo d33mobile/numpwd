@@ -11,6 +11,7 @@ import static androidx.test.espresso.assertion.ViewAssertions.doesNotExist;
 import static androidx.test.espresso.assertion.ViewAssertions.matches;
 import static androidx.test.espresso.matcher.RootMatchers.isDialog;
 import static androidx.test.espresso.matcher.ViewMatchers.isDisplayed;
+import static androidx.test.espresso.matcher.ViewMatchers.isEnabled;
 import static androidx.test.espresso.matcher.ViewMatchers.withId;
 import static androidx.test.espresso.matcher.ViewMatchers.withText;
 import static org.hamcrest.Matchers.is;
@@ -72,6 +73,7 @@ public class KeysActivityTest {
     private static final long RESULT_TIMEOUT_MS = 30_000;
     private static final char PASSWORD_DOT = '\u2022';
     private static final long CLIPBOARD_CLEAR_SLACK_MS = 3_000;
+    private static final long CLIPBOARD_SET_TIMEOUT_MS = 5_000;
 
     private ActivityScenario<KeysActivity> scenario;
 
@@ -112,7 +114,7 @@ public class KeysActivityTest {
         assertEquals(TEST_CODE, waitForResult());
         onView(withId(R.id.result_full)).inRoot(isDialog()).check(matches(withText(TEST_DIGITS_GROUPED)));
 
-        onView(withId(android.R.id.button1)).inRoot(isDialog()).perform(click());
+        onView(withId(android.R.id.button1)).inRoot(isDialog()).check(matches(isEnabled())).perform(click());
         assertEquals(TEST_CODE, clipboardText());
         onView(withId(android.R.id.button3)).inRoot(isDialog()).perform(click());
         assertEquals(TEST_DIGITS, clipboardText());
@@ -129,8 +131,8 @@ public class KeysActivityTest {
         onData(is("test")).inAdapterView(withId(R.id.keys)).perform(tap());
         enterInDialog("abc");
         assertEquals(TEST_CODE, waitForResult());
-        onView(withId(android.R.id.button1)).inRoot(isDialog()).perform(click());
-        assertEquals(TEST_CODE, clipboardText());
+        onView(withId(android.R.id.button1)).inRoot(isDialog()).check(matches(isEnabled())).perform(click());
+        assertEquals(TEST_CODE, waitForClipboard(TEST_CODE));
 
         scenario.recreate();
         SystemClock.sleep(KeysActivity.CLIPBOARD_CLEAR_MS + CLIPBOARD_CLEAR_SLACK_MS);
@@ -181,6 +183,8 @@ public class KeysActivityTest {
         });
         onView(withId(R.id.input_layout)).inRoot(isDialog()).check((view, e) ->
                 assertEquals(TextInputLayout.END_ICON_NONE, ((TextInputLayout) view).getEndIconMode()));
+        // A dialog left open leaks its window when the activity closes and upsets the next test.
+        onView(withId(android.R.id.button2)).inRoot(isDialog()).perform(click());
     }
 
     @Test
@@ -313,6 +317,17 @@ public class KeysActivityTest {
                 text[0] = String.valueOf(clip.getItemAt(0).getText());
         });
         return text[0];
+    }
+
+    /** The clipboard text once it equals {@code expected}, or whatever it holds after a few seconds. */
+    private static String waitForClipboard(String expected) {
+        long deadline = SystemClock.uptimeMillis() + CLIPBOARD_SET_TIMEOUT_MS;
+        String text = clipboardText();
+        while (!expected.equals(text) && SystemClock.uptimeMillis() < deadline) {
+            SystemClock.sleep(100);
+            text = clipboardText();
+        }
+        return text;
     }
 
     private static String computing() {

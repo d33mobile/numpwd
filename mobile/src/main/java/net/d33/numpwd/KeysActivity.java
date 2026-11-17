@@ -473,8 +473,10 @@ public class KeysActivity extends AppCompatActivity {
         dialog.setOnShowListener(d -> {
             View copy = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
             View copyAll = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
-            copy.setEnabled(false);
-            copyAll.setEnabled(false);
+            // Dialog delivers this listener through a message, so a fast derivation may have
+            // finished and enabled the buttons already.
+            copy.setEnabled(digits[0] != null);
+            copyAll.setEnabled(digits[0] != null);
             copy.setOnClickListener(v -> copyToClipboard(NumericPassword.sixDigits(digits[0])));
             copyAll.setOnClickListener(v -> copyToClipboard(digits[0]));
         });
