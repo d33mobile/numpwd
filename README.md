@@ -58,6 +58,13 @@ typing. A lock icon in the list marks such keys.
 - Enrolling a new fingerprint or removing the screen lock invalidates the key.
   numpwd then forgets all remembered passwords, says so, and asks for the
   password again.
+- The stored value has the same size for every password, so it does not
+  reveal the password's length, and it is bound to its key name. Renaming a
+  key forgets its remembered password. Passwords remembered with numpwd 1.5 or
+  older keep working; forget and remember them again to store them in the
+  fixed-size form.
+- A remembered password is removed only when its stored value is damaged.
+  Other Keystore errors leave it in place and ask for the password this time.
 - Long-press a key for **Forget password**; the menu has **Forget all
   remembered passwords**. Remembered passwords are not included in Android
   backup.
@@ -126,7 +133,15 @@ the emulator console, which needs the console token:
     -Pandroid.testInstrumentationRunnerArguments.emulatorConsoleToken="$(cat ~/.emulator_console_auth_token)"
 ```
 
-Without the token they are skipped.
+Without the token they are skipped. They also need API 31 or newer to reach
+the console; on older versions `KeystoreKeyTest` still checks the Keystore key
+once a fingerprint was enrolled by hand.
+
+The UI tests pass on API 23, 29, 34 and 36 emulators, and remembering and
+unlocking with the fingerprint was checked there. On the API 29 emulator a new
+fingerprint does not invalidate the key, because its emulated sensor never
+changes the ID that Android binds the key to; the API 23, 34 and 36 emulators
+invalidate it as expected.
 
 CI (`.github/workflows/build.yml`) runs all three plus Android lint.
 

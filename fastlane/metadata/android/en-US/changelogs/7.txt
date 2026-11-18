@@ -1,0 +1,5 @@
+* Remembered passwords are stored padded to a fixed size and bound to their key name. Passwords remembered with 1.5 still work; renaming a key now forgets its password.
+* A temporary Keystore error no longer deletes a remembered password.
+* Tapping two keys quickly no longer loses the second key's password.
+* The clipboard is cleared after 30 s also when the screen was rotated or closed.
+* The Copy buttons no longer stay greyed out when the code is ready very fast.
