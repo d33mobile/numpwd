@@ -172,9 +172,12 @@ public class KeysActivityTest {
             EditText input = (EditText) view;
             assertEquals("q", String.valueOf(input.getText()));
             assertEquals(String.valueOf(PASSWORD_DOT), String.valueOf(input.getLayout().getText()));
-            int ime = input.getImeOptions();
-            assertEquals(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING,
-                    ime & EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
+            // The flag exists since API 26.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                int ime = input.getImeOptions();
+                assertEquals(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING,
+                        ime & EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
+            }
             int type = input.getInputType();
             assertEquals(InputType.TYPE_TEXT_VARIATION_PASSWORD,
                     type & InputType.TYPE_MASK_VARIATION);
